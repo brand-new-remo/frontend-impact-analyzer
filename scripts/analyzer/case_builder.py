@@ -37,6 +37,18 @@ class TestCaseBuilder:
         for tag, builder in mapping:
             if tag in semantics:
                 groups.append(builder(impact, page_name))
+        api_kinds = {item["kind"] for item in impact.api_changes}
+        api_mapping = [
+            ("request-field-change", self._api_request_field_case),
+            ("response-field-change", self._api_response_field_case),
+            ("enum-change", self._enum_case),
+            ("pagination-shape-change", self._pagination_shape_case),
+            ("detail-schema-change", self._detail_schema_case),
+            ("list-schema-change", self._list_schema_case),
+        ]
+        for kind, builder in api_mapping:
+            if kind in api_kinds:
+                groups.append(builder(impact, page_name))
         return groups
 
     def _mk(self, impact: PageImpact, page_name: str, case_name: str, steps, expected, sort_priority: int) -> TestCase:
@@ -83,6 +95,18 @@ class TestCaseBuilder:
         return self._mk(impact, page_name, f"{page_name} 上传流程验证", [f"进入页面 {page_name}", "执行文件上传"], ["上传前校验正确", "上传成功与失败反馈正确"], 26)
     def _disabled_case(self, impact, page_name):
         return self._mk(impact, page_name, f"{page_name} 禁用态与只读态验证", [f"进入页面 {page_name}", "观察控件禁用态或只读态", "尝试触发操作"], ["禁用态展示正确", "不可操作时拦截正确", "可操作条件下行为恢复正常"], 32)
+    def _api_request_field_case(self, impact, page_name):
+        return self._mk(impact, page_name, f"{page_name} 接口请求字段变更验证", [f"进入页面 {page_name}", "触发请求或提交流程", "检查请求字段和参数结构"], ["新增/删除/重命名的请求字段符合预期", "请求参数结构与后端约定一致"], 13)
+    def _api_response_field_case(self, impact, page_name):
+        return self._mk(impact, page_name, f"{page_name} 接口响应字段映射验证", [f"进入页面 {page_name}", "触发数据加载", "检查页面字段展示和映射结果"], ["响应字段变化后页面展示正确", "缺失或新增字段时页面容错符合预期"], 16)
+    def _enum_case(self, impact, page_name):
+        return self._mk(impact, page_name, f"{page_name} 枚举值与状态映射验证", [f"进入页面 {page_name}", "触发包含状态/类型枚举的操作或展示", "检查枚举值对应文案、状态和交互"], ["新增/删除/调整的枚举值映射正确", "异常或未知枚举值处理符合预期"], 19)
+    def _pagination_shape_case(self, impact, page_name):
+        return self._mk(impact, page_name, f"{page_name} 分页参数结构验证", [f"进入页面 {page_name}", "执行分页或翻页操作", "检查请求参数与返回结果"], ["分页参数名和结构正确", "分页结果、总数和翻页行为符合预期"], 17)
+    def _detail_schema_case(self, impact, page_name):
+        return self._mk(impact, page_name, f"{page_name} 详情接口字段结构验证", [f"进入页面 {page_name}", "进入详情或编辑态", "检查详情字段展示与回显"], ["详情接口字段变化后页面展示正确", "字段缺失、重命名或新增时回显符合预期"], 21)
+    def _list_schema_case(self, impact, page_name):
+        return self._mk(impact, page_name, f"{page_name} 列表接口字段结构验证", [f"进入页面 {page_name}", "触发列表加载", "检查列表项、列和筛选结果"], ["列表接口字段变化后展示正确", "新增/删除字段对列表和筛选无异常影响"], 23)
 
     def _dedupe(self, cases: List[TestCase]) -> List[TestCase]:
         out: List[TestCase] = []

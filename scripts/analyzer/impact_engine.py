@@ -53,6 +53,7 @@ class ImpactAnalyzer:
                     impact_reason=self._reason(cf.file_type, trace, semantics, matched_symbols),
                     semantic_tags=semantics,
                     matched_symbols=matched_symbols,
+                    api_changes=cf.api_changes,
                 ))
         return impacts, None
 
@@ -70,6 +71,7 @@ class ImpactAnalyzer:
             impact_reason="changed file is page",
             semantic_tags=semantics,
             matched_symbols=changed_symbols,
+            api_changes=cf.api_changes,
         ) for rp in self.route_map.get(cf.path, [None])]
 
     def _trace_to_pages(self, start_file: str, changed_symbols: List[str]) -> List[Tuple[List[str], List[str]]]:

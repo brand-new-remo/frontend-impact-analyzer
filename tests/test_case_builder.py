@@ -31,3 +31,35 @@ def test_case_builder_returns_sorted_case_array_shape():
     assert output[0]["用例可置信度"] == "medium"
     assert "shared-component changed" in output[0]["来源描述"]
     assert "变更文件: src/components/shared/SearchForm.tsx" in output[0]["来源描述"]
+
+
+def test_case_builder_adds_specific_api_field_level_cases():
+    impact = PageImpact(
+        changed_file="src/services/orderApi.ts",
+        page_file="src/pages/orders/OrderListPage.tsx",
+        route_path="/orders",
+        module_name="orders",
+        trace=["src/services/orderApi.ts", "src/pages/orders/OrderListPage.tsx"],
+        impact_type="direct",
+        confidence="high",
+        impact_reason="api changed, traced to page through 2 hop(s), semantics: api, list-query, detail, validation, submit",
+        semantic_tags=["api", "list-query", "detail", "validation", "submit"],
+        api_changes=[
+            {"kind": "request-field-change", "change": "added", "field": "pageSize"},
+            {"kind": "response-field-change", "change": "added", "field": "detailTitle"},
+            {"kind": "enum-change", "change": "added", "field": "ACTIVE"},
+            {"kind": "pagination-shape-change", "change": "added", "field": "pageSize"},
+            {"kind": "detail-schema-change", "change": "added", "field": "detailTitle"},
+            {"kind": "list-schema-change", "change": "added", "field": "itemTitle"},
+        ],
+    )
+
+    cases = [case.to_output_dict() for case in TestCaseBuilder().build([impact])]
+    case_names = [item["用例名称"] for item in cases]
+
+    assert "Order List Page 接口请求字段变更验证" in case_names
+    assert "Order List Page 接口响应字段映射验证" in case_names
+    assert "Order List Page 枚举值与状态映射验证" in case_names
+    assert "Order List Page 分页参数结构验证" in case_names
+    assert "Order List Page 详情接口字段结构验证" in case_names
+    assert "Order List Page 列表接口字段结构验证" in case_names

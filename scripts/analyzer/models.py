@@ -31,6 +31,7 @@ class ChangedFile:
     removed_lines: int = 0
     symbols: List[str] = field(default_factory=list)
     semantic_tags: List[str] = field(default_factory=list)
+    api_changes: List[Dict[str, str]] = field(default_factory=list)
     file_type: str = "unknown"
     module_guess: str = "unknown"
     is_format_only: bool = False
@@ -80,6 +81,7 @@ class PageImpact:
     impact_reason: str
     semantic_tags: List[str] = field(default_factory=list)
     matched_symbols: List[str] = field(default_factory=list)
+    api_changes: List[Dict[str, str]] = field(default_factory=list)
 
 
 @dataclass

@@ -49,3 +49,37 @@ index 1234567..89abcde 100644
     assert changed_files[0].is_format_only is True
     assert changed_files[0].symbols == []
     assert changed_files[0].semantic_tags == []
+
+
+def test_diff_parser_detects_api_field_level_changes():
+    diff_text = """
+feat(api): adjust list and detail contracts
+
+diff --git a/src/services/orderApi.ts b/src/services/orderApi.ts
+index 1234567..89abcde 100644
+--- a/src/services/orderApi.ts
++++ b/src/services/orderApi.ts
+@@ -1,8 +1,10 @@
+-  params: { pageNum, status }
++  params: { pageSize, statusCode }
+-  response: { data: { detailName } }
++  response: { data: { detailTitle } }
+-  list: { columns: itemName }
++  list: { columns: itemTitle }
+-  enum status: ["ENABLED", "DISABLED"]
++  enum status: ["ACTIVE", "DISABLED"]
+"""
+
+    _, changed_files = GitDiffParser(diff_text).parse()
+
+    assert len(changed_files) == 1
+    changed_file = changed_files[0]
+    assert changed_file.is_format_only is False
+    assert {"api", "list-query", "detail", "validation", "submit"} <= set(changed_file.semantic_tags)
+    assert {"kind": "response-field-change", "change": "rename", "field": "detailTitle", "from": "detailName"} in changed_file.api_changes
+    assert {"kind": "request-field-change", "change": "added", "field": "pageSize"} in changed_file.api_changes
+    assert {"kind": "request-field-change", "change": "removed", "field": "pageNum"} in changed_file.api_changes
+    assert {"kind": "pagination-shape-change", "change": "added", "field": "pageSize"} in changed_file.api_changes
+    assert {"kind": "detail-schema-change", "change": "added", "field": "detailTitle"} in changed_file.api_changes
+    assert {"kind": "list-schema-change", "change": "added", "field": "itemTitle"} in changed_file.api_changes
+    assert {"kind": "enum-change", "change": "added", "field": "ACTIVE"} in changed_file.api_changes

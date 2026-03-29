@@ -94,12 +94,12 @@
 
 目标：让这个 skill 更接近 QA 真正关心的业务风险。
 
-- [ ] 增加 request field add/remove/rename 检测。
-- [ ] 增加 response field add/remove/rename 检测。
-- [ ] 增加 enum/value change 检测。
-- [ ] 增加 pagination/query parameter shape change 检测。
-- [ ] 增加 detail/list schema change 检测。
-- [ ] 把 API 字段级变化映射到更具体的测试 case 模板。
+- [x] 增加 request field add/remove/rename 检测。
+- [x] 增加 response field add/remove/rename 检测。
+- [x] 增加 enum/value change 检测。
+- [x] 增加 pagination/query parameter shape change 检测。
+- [x] 增加 detail/list schema change 检测。
+- [x] 把 API 字段级变化映射到更具体的测试 case 模板。
 
 ## Phase 5: 强化 case generation 的业务表达
 
@@ -129,7 +129,7 @@
 - [x] 先完成 Phase 1 的 fixtures + tests。
 - [x] 然后集中推进 Phase 2 的 alias / barrel / nested route。
 - [x] 接着推进 Phase 3 的 symbol-level tracing。
-- [ ] 再做 Phase 4 的 API field diff。
+- [x] 再做 Phase 4 的 API field diff。
 - [ ] 最后增强 Phase 5 和 Phase 6。
 
 ## 第一批最值得立刻开始的具体任务
@@ -158,3 +158,4 @@
 - [x] 完成 Phase 2 第一轮：alias extends、多目标 alias、multi-hop barrel、递归 nested routes
 - [x] 完成 Phase 2 第二轮：lazy route 绑定、scanner diagnostics、barrel evidence state
 - [x] 完成 Phase 3 第一轮：symbol-level first-hop filtering、format-only diff skip、matched symbol evidence
+- [x] 完成 Phase 4 第一轮：API 字段级 diff 检测与用例模板映射
