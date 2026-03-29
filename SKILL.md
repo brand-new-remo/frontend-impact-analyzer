@@ -10,16 +10,17 @@ Analyze requirement text and git diff for React + React Router + Vite projects a
 ## Workflow
 
 1. Save the provided requirement text and git diff into files if needed.
-2. Run `python scripts/front_end_impact_analyzer.py` with:
+2. Sync the project environment with `uv sync`.
+3. Run `uv run python scripts/front_end_impact_analyzer.py` with:
    - `--project-root`
    - `--diff-file`
    - optional `--requirement-file`
    - optional output paths
-3. Read:
+4. Read:
    - `impact-analysis-state.json` for evidence, traces, logs, and unresolved items
    - `impact-analysis-result.json` for the final JSON test cases
-4. Base the final answer on the generated JSON. Do not invent impacted pages that are not supported by traces or route evidence.
-5. If confidence is low, keep it low and explain why.
+5. Base the final answer on the generated JSON. Do not invent impacted pages that are not supported by traces or route evidence.
+6. If confidence is low, keep it low and explain why.
 
 ## Output rules
 
