@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from typing import List
 
 from .common import confidence_to_priority, title_from_file, uniq_keep_order
@@ -17,6 +18,7 @@ class TestCaseBuilder:
         semantics = set(impact.semantic_tags)
         page_name = title_from_file(impact.page_file)
         groups = [self._base_case(impact, page_name)]
+        operations = self._infer_operations(impact, page_name)
         mapping = [
             ("button", self._button_case),
             ("modal", self._modal_case),
@@ -49,10 +51,15 @@ class TestCaseBuilder:
         for kind, builder in api_mapping:
             if kind in api_kinds:
                 groups.append(builder(impact, page_name))
+        for operation in operations:
+            groups.append(self._business_operation_case(impact, page_name, operation))
+        if "permission" in semantics:
+            for operation in operations or ["access"]:
+                groups.append(self._role_variant_case(impact, page_name, operation))
         return groups
 
     def _mk(self, impact: PageImpact, page_name: str, case_name: str, steps, expected, sort_priority: int) -> TestCase:
-        source_parts = [impact.impact_reason]
+        source_parts = [self._business_reason(impact)]
         if impact.route_path:
             source_parts.append(f"关联路由: {impact.route_path}")
         if impact.changed_file:
@@ -107,6 +114,92 @@ class TestCaseBuilder:
         return self._mk(impact, page_name, f"{page_name} 详情接口字段结构验证", [f"进入页面 {page_name}", "进入详情或编辑态", "检查详情字段展示与回显"], ["详情接口字段变化后页面展示正确", "字段缺失、重命名或新增时回显符合预期"], 21)
     def _list_schema_case(self, impact, page_name):
         return self._mk(impact, page_name, f"{page_name} 列表接口字段结构验证", [f"进入页面 {page_name}", "触发列表加载", "检查列表项、列和筛选结果"], ["列表接口字段变化后展示正确", "新增/删除字段对列表和筛选无异常影响"], 23)
+
+    def _business_operation_case(self, impact, page_name, operation: str):
+        if operation == "list":
+            return self._mk(impact, page_name, f"{page_name} 列表浏览与关键操作验证", [f"进入页面 {page_name}", "执行列表加载、筛选和主要行操作"], ["列表加载正确", "关键操作入口可用", "列表主流程符合预期"], 11)
+        if operation == "detail":
+            return self._mk(impact, page_name, f"{page_name} 详情查看主流程验证", [f"进入页面 {page_name}", "进入详情场景并检查关键信息"], ["详情主信息展示正确", "详情相关交互和回显符合预期"], 12)
+        if operation == "create":
+            return self._mk(impact, page_name, f"{page_name} 新增主流程验证", [f"进入页面 {page_name}", "触发新增入口", "填写必要信息并提交"], ["新增入口可用", "新增提交成功或失败反馈正确", "新增结果在页面中可见"], 13)
+        if operation == "edit":
+            return self._mk(impact, page_name, f"{page_name} 编辑主流程验证", [f"进入页面 {page_name}", "进入编辑场景", "修改数据并提交"], ["编辑前回显正确", "编辑提交反馈正确", "编辑后的结果展示正确"], 14)
+        if operation == "delete":
+            return self._mk(impact, page_name, f"{page_name} 删除主流程验证", [f"进入页面 {page_name}", "选择目标数据并执行删除"], ["删除确认流程正确", "删除结果反馈正确", "删除后的数据状态正确"], 15)
+        return self._mk(impact, page_name, f"{page_name} 业务主流程验证", [f"进入页面 {page_name}", "执行业务主路径"], ["业务主路径可正常完成"], 18)
+
+    def _role_variant_case(self, impact, page_name, operation: str):
+        label = {
+            "list": "列表查看",
+            "detail": "详情查看",
+            "create": "新增",
+            "edit": "编辑",
+            "delete": "删除",
+            "access": "访问",
+        }.get(operation, "业务操作")
+        return self._mk(
+            impact,
+            page_name,
+            f"{page_name} {label}的角色权限差异验证",
+            [f"分别使用不同角色账号进入页面 {page_name}", f"验证{label}入口、按钮和提交能力"],
+            [f"不同角色下{label}权限符合预期", "越权场景被正确拦截"],
+            16,
+        )
+
+    def _infer_operations(self, impact: PageImpact, page_name: str) -> List[str]:
+        semantics = set(impact.semantic_tags)
+        text = " ".join([
+            page_name.lower(),
+            impact.page_file.lower(),
+            (impact.route_path or "").lower(),
+            impact.changed_file.lower(),
+        ])
+        operations: List[str] = []
+        if "table" in semantics or "list-query" in semantics or re.search(r"\blist\b|\bindex\b|\btable\b", text):
+            operations.append("list")
+        if "detail" in semantics or re.search(r"\bdetail\b|\bview\b|\binfo\b", text):
+            operations.append("detail")
+        if re.search(r"\bcreate\b|\bnew\b|\badd\b", text):
+            operations.append("create")
+        if re.search(r"\bedit\b|\bupdate\b", text):
+            operations.append("edit")
+        if "delete" in semantics or re.search(r"\bdelete\b|\bremove\b", text):
+            operations.append("delete")
+        if "form" in semantics and "submit" in semantics and ("detail" in semantics or re.search(r"\bdetail\b|\bedit\b|\bupdate\b", text)) and not any(op in operations for op in {"create", "edit"}):
+            operations.append("edit")
+        return uniq_keep_order(operations)
+
+    def _business_reason(self, impact: PageImpact) -> str:
+        parts = [impact.impact_reason]
+        operations = self._infer_operations(impact, title_from_file(impact.page_file))
+        if operations:
+            op_labels = {
+                "list": "列表",
+                "detail": "详情",
+                "create": "新增",
+                "edit": "编辑",
+                "delete": "删除",
+            }
+            parts.append("业务动作: " + "/".join(op_labels.get(item, item) for item in operations))
+        if impact.matched_symbols:
+            parts.append("命中符号: " + ", ".join(impact.matched_symbols))
+        if impact.api_changes:
+            change_labels = uniq_keep_order([self._api_change_label(item["kind"]) for item in impact.api_changes])
+            parts.append("接口风险: " + "、".join(change_labels))
+        if impact.module_name and impact.module_name != "unknown":
+            parts.append(f"模块: {impact.module_name}")
+        return "；".join(parts)
+
+    def _api_change_label(self, kind: str) -> str:
+        mapping = {
+            "request-field-change": "请求字段",
+            "response-field-change": "响应字段",
+            "enum-change": "枚举值",
+            "pagination-shape-change": "分页参数",
+            "detail-schema-change": "详情结构",
+            "list-schema-change": "列表结构",
+        }
+        return mapping.get(kind, kind)
 
     def _dedupe(self, cases: List[TestCase]) -> List[TestCase]:
         out: List[TestCase] = []

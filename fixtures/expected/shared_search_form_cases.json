@@ -12,7 +12,23 @@
     ],
     "用例等级": "medium",
     "用例可置信度": "medium",
-    "来源描述": "shared-component changed, traced to page through 2 hop(s), semantics: submit, form, button, disabled-state；关联路由: /users；变更文件: src/components/shared/SearchForm.tsx"
+    "来源描述": "shared-component changed, traced to page through 2 hop(s), semantics: submit, form, button, disabled-state；业务动作: 列表；模块: users；关联路由: /users；变更文件: src/components/shared/SearchForm.tsx"
+  },
+  {
+    "页面名": "User List Page",
+    "用例名称": "User List Page 列表浏览与关键操作验证",
+    "测试步骤": [
+      "进入页面 User List Page",
+      "执行列表加载、筛选和主要行操作"
+    ],
+    "预期结果": [
+      "列表加载正确",
+      "关键操作入口可用",
+      "列表主流程符合预期"
+    ],
+    "用例等级": "medium",
+    "用例可置信度": "medium",
+    "来源描述": "shared-component changed, traced to page through 2 hop(s), semantics: submit, form, button, disabled-state；业务动作: 列表；模块: users；关联路由: /users；变更文件: src/components/shared/SearchForm.tsx"
   },
   {
     "页面名": "User List Page",
@@ -30,7 +46,7 @@
     ],
     "用例等级": "medium",
     "用例可置信度": "medium",
-    "来源描述": "shared-component changed, traced to page through 2 hop(s), semantics: submit, form, button, disabled-state；关联路由: /users；变更文件: src/components/shared/SearchForm.tsx"
+    "来源描述": "shared-component changed, traced to page through 2 hop(s), semantics: submit, form, button, disabled-state；业务动作: 列表；模块: users；关联路由: /users；变更文件: src/components/shared/SearchForm.tsx"
   },
   {
     "页面名": "User List Page",
@@ -47,7 +63,7 @@
     ],
     "用例等级": "medium",
     "用例可置信度": "medium",
-    "来源描述": "shared-component changed, traced to page through 2 hop(s), semantics: submit, form, button, disabled-state；关联路由: /users；变更文件: src/components/shared/SearchForm.tsx"
+    "来源描述": "shared-component changed, traced to page through 2 hop(s), semantics: submit, form, button, disabled-state；业务动作: 列表；模块: users；关联路由: /users；变更文件: src/components/shared/SearchForm.tsx"
   },
   {
     "页面名": "User List Page",
@@ -64,6 +80,6 @@
     ],
     "用例等级": "medium",
     "用例可置信度": "medium",
-    "来源描述": "shared-component changed, traced to page through 2 hop(s), semantics: submit, form, button, disabled-state；关联路由: /users；变更文件: src/components/shared/SearchForm.tsx"
+    "来源描述": "shared-component changed, traced to page through 2 hop(s), semantics: submit, form, button, disabled-state；业务动作: 列表；模块: users；关联路由: /users；变更文件: src/components/shared/SearchForm.tsx"
   }
 ]

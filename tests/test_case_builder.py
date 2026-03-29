@@ -22,6 +22,7 @@ def test_case_builder_returns_sorted_case_array_shape():
 
     assert [item["用例名称"] for item in output] == [
         "User List Page 页面基础回归",
+        "User List Page 列表浏览与关键操作验证",
         "User List Page 表单展示校验与提交流程验证",
         "User List Page 按钮入口与点击行为验证",
         "User List Page 禁用态与只读态验证",
@@ -63,3 +64,31 @@ def test_case_builder_adds_specific_api_field_level_cases():
     assert "Order List Page 分页参数结构验证" in case_names
     assert "Order List Page 详情接口字段结构验证" in case_names
     assert "Order List Page 列表接口字段结构验证" in case_names
+
+
+def test_case_builder_adds_business_operation_and_role_variant_cases():
+    impact = PageImpact(
+        changed_file="src/pages/orders/OrderDetailEditPage.tsx",
+        page_file="src/pages/orders/OrderDetailEditPage.tsx",
+        route_path="/orders/detail/edit",
+        module_name="orders",
+        trace=["src/pages/orders/OrderDetailEditPage.tsx"],
+        impact_type="direct",
+        confidence="high",
+        impact_reason="page changed, traced to page through 1 hop(s), semantics: form, detail, delete, permission, submit",
+        semantic_tags=["form", "detail", "delete", "permission", "submit"],
+        matched_symbols=["OrderDetailEditPage"],
+    )
+
+    cases = [case.to_output_dict() for case in TestCaseBuilder().build([impact])]
+    case_names = [item["用例名称"] for item in cases]
+    source_descriptions = [item["来源描述"] for item in cases]
+
+    assert "Order Detail Edit Page 详情查看主流程验证" in case_names
+    assert "Order Detail Edit Page 编辑主流程验证" in case_names
+    assert "Order Detail Edit Page 删除主流程验证" in case_names
+    assert "Order Detail Edit Page 详情查看的角色权限差异验证" in case_names
+    assert "Order Detail Edit Page 编辑的角色权限差异验证" in case_names
+    assert "Order Detail Edit Page 删除的角色权限差异验证" in case_names
+    assert any("业务动作: 详情/编辑/删除" in item for item in source_descriptions)
+    assert any("命中符号: OrderDetailEditPage" in item for item in source_descriptions)

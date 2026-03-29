@@ -105,12 +105,12 @@
 
 目标：让结果更像“可执行测试建议”，而不是泛泛的 smoke case。
 
-- [ ] 在现有模板上增加更细粒度语义映射。
-- [ ] 支持 create/edit/list/detail/delete 分组。
-- [ ] 支持 role-based case variant。
+- [x] 在现有模板上增加更细粒度语义映射。
+- [x] 支持 create/edit/list/detail/delete 分组。
+- [x] 支持 role-based case variant。
 - [ ] 支持模块级术语定制。
-- [ ] 优化 case 去重策略，减少内容重复但保留必要差异。
-- [ ] 补充 `impactReason` 的业务化表达，同时保留技术证据。
+- [x] 优化 case 去重策略，减少内容重复但保留必要差异。
+- [x] 补充 `impactReason` 的业务化表达，同时保留技术证据。
 
 ## Phase 6: 强化 skill 作为 agent 工具的可用性
 
@@ -159,3 +159,4 @@
 - [x] 完成 Phase 2 第二轮：lazy route 绑定、scanner diagnostics、barrel evidence state
 - [x] 完成 Phase 3 第一轮：symbol-level first-hop filtering、format-only diff skip、matched symbol evidence
 - [x] 完成 Phase 4 第一轮：API 字段级 diff 检测与用例模板映射
+- [x] 完成 Phase 5 第一轮：业务动作分组、角色变体、业务化来源描述
