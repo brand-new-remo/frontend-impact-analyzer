@@ -1,0 +1,45 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://frontend-impact-analyzer.local/schemas/analysis-state.schema.json",
+  "title": "Frontend Impact Analyzer State",
+  "type": "object",
+  "additionalProperties": true,
+  "required": [
+    "meta",
+    "input",
+    "parsedDiff",
+    "codeGraph",
+    "codeImpact",
+    "businessImpact",
+    "output",
+    "processLogs"
+  ],
+  "properties": {
+    "meta": {
+      "type": "object",
+      "required": [
+        "projectType",
+        "analysisTime",
+        "analysisStatus",
+        "outputContract",
+        "stateSchema",
+        "resultSchema"
+      ],
+      "properties": {
+        "projectType": {"type": "string"},
+        "analysisTime": {"type": "string"},
+        "analysisStatus": {
+          "type": "string",
+          "enum": ["running", "success", "partial_success", "failed"]
+        },
+        "outputContract": {"type": "string"},
+        "stateSchema": {"type": "string"},
+        "resultSchema": {"type": "string"},
+        "statusSummary": {"type": "object"}
+      }
+    },
+    "output": {
+      "$ref": "case-array.schema.json"
+    }
+  }
+}

@@ -1,0 +1,50 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://frontend-impact-analyzer.local/schemas/case-array.schema.json",
+  "title": "Frontend Impact Analyzer Case Array",
+  "type": "array",
+  "items": {
+    "type": "object",
+    "additionalProperties": false,
+    "required": [
+      "页面名",
+      "用例名称",
+      "测试步骤",
+      "预期结果",
+      "用例等级",
+      "用例可置信度",
+      "来源描述"
+    ],
+    "properties": {
+      "页面名": {
+        "type": "string"
+      },
+      "用例名称": {
+        "type": "string"
+      },
+      "测试步骤": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        }
+      },
+      "预期结果": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        }
+      },
+      "用例等级": {
+        "type": "string",
+        "enum": ["high", "medium", "low"]
+      },
+      "用例可置信度": {
+        "type": "string",
+        "enum": ["high", "medium", "low"]
+      },
+      "来源描述": {
+        "type": "string"
+      }
+    }
+  }
+}

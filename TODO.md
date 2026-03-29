@@ -116,11 +116,11 @@
 
 目标：让 Codex / Claude Code 这类调用方更容易稳定集成。
 
-- [ ] 明确输入输出契约。
-- [ ] 为最终输出补充 JSON schema。
-- [ ] 为 state 输出补充 JSON schema。
-- [ ] 明确成功、部分成功、失败、低置信度的状态表达。
-- [ ] 在 `SKILL.md` 中补充推荐调用方式和失败处理约定。
+- [x] 明确输入输出契约。
+- [x] 为最终输出补充 JSON schema。
+- [x] 为 state 输出补充 JSON schema。
+- [x] 明确成功、部分成功、失败、低置信度的状态表达。
+- [x] 在 `SKILL.md` 中补充推荐调用方式和失败处理约定。
 - [ ] 在结果中增加更清晰的 unresolved / sharedRisks 说明字段。
 - [ ] 评估是否需要 machine-readable diagnostics 字段，方便 agent 二次处理。
 
@@ -160,3 +160,4 @@
 - [x] 完成 Phase 3 第一轮：symbol-level first-hop filtering、format-only diff skip、matched symbol evidence
 - [x] 完成 Phase 4 第一轮：API 字段级 diff 检测与用例模板映射
 - [x] 完成 Phase 5 第一轮：业务动作分组、角色变体、业务化来源描述
+- [x] 完成 Phase 6 第一轮：schema、状态表达、推荐调用约定、CLI 失败时状态输出

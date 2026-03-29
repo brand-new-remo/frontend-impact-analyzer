@@ -19,8 +19,12 @@ Analyze requirement text and git diff for React + React Router + Vite projects a
 4. Read:
    - `impact-analysis-state.json` for evidence, traces, logs, and unresolved items
    - `impact-analysis-result.json` for the final JSON case array
-5. Base the final answer on the generated JSON array. Do not invent impacted pages that are not supported by traces or route evidence.
-6. If confidence is low, keep it low and explain why.
+5. Check `meta.analysisStatus` in `impact-analysis-state.json`:
+   - `success`: analysis completed without unresolved files or diagnostics
+   - `partial_success`: analysis completed but unresolved files or diagnostics exist
+   - `failed`: the analyzer could not complete and wrote a fatal diagnostic into state
+6. Base the final answer on the generated JSON array. Do not invent impacted pages that are not supported by traces or route evidence.
+7. If confidence is low, keep it low and explain why.
 
 ## Output rules
 
@@ -36,6 +40,18 @@ Each item should contain:
 - `来源描述`
 
 The current skill only generates the case array. It does not execute test cases.
+
+Schemas:
+- Result schema: `schemas/case-array.schema.json`
+- State schema: `schemas/analysis-state.schema.json`
+
+## Recommended Invocation
+
+- Preferred command:
+  `uv run python scripts/front_end_impact_analyzer.py --project-root <project_root> --diff-file <diff_file> --requirement-file <requirement_file>`
+- The agent should read both result and state files.
+- If `analysisStatus` is `partial_success`, keep the output but surface unresolved files and diagnostics.
+- If `analysisStatus` is `failed`, do not invent any fallback case array. Use the fatal diagnostic from state.
 
 ## Heuristics
 

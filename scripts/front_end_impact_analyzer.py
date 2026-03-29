@@ -24,6 +24,10 @@ class FrontendImpactAnalysisEngine:
             meta={
                 "projectType": "react-vite-react-router",
                 "analysisTime": __import__("time").strftime("%Y-%m-%d %H:%M:%S"),
+                "analysisStatus": "running",
+                "outputContract": "case-array-v1",
+                "stateSchema": "schemas/analysis-state.schema.json",
+                "resultSchema": "schemas/case-array.schema.json",
             },
             input={
                 "requirementText": requirement_text,
@@ -84,7 +88,24 @@ class FrontendImpactAnalysisEngine:
         self.recorder.log("build_cases", "done", f"generated {len(cases)} cases")
 
         self.state.output = [c.to_output_dict() for c in cases]
+        self.state.meta["analysisStatus"] = self._analysis_status(page_impacts, unresolved, diagnostics)
+        self.state.meta["statusSummary"] = {
+            "changedFileCount": len(changed_files),
+            "pageImpactCount": len(page_impacts),
+            "caseCount": len(cases),
+            "unresolvedFileCount": len(unresolved),
+            "diagnosticCount": len(diagnostics),
+        }
         return self.state
+
+    def _analysis_status(self, page_impacts, unresolved, diagnostics):
+        if page_impacts:
+            if unresolved or diagnostics:
+                return "partial_success"
+            return "success"
+        if unresolved or diagnostics:
+            return "partial_success"
+        return "success"
 
 
 def main():
@@ -100,11 +121,35 @@ def main():
     diff_text = Path(args.diff_file).read_text(encoding="utf-8", errors="ignore")
     requirement_text = Path(args.requirement_file).read_text(encoding="utf-8", errors="ignore") if args.requirement_file else ""
 
-    state = FrontendImpactAnalysisEngine(project_root, diff_text, requirement_text).run()
+    engine = FrontendImpactAnalysisEngine(project_root, diff_text, requirement_text)
+    try:
+        state = engine.run()
+        exit_code = 0
+    except Exception as exc:
+        engine.recorder.log("analysis", "failed", str(exc))
+        engine.state.meta["analysisStatus"] = "failed"
+        engine.state.meta["statusSummary"] = {
+            "changedFileCount": 0,
+            "pageImpactCount": 0,
+            "caseCount": 0,
+            "unresolvedFileCount": 0,
+            "diagnosticCount": 1,
+        }
+        engine.state.codeGraph["diagnostics"].append({
+            "type": "fatal-error",
+            "file": "",
+            "target": "",
+            "message": str(exc),
+        })
+        state = engine.state
+        exit_code = 1
+
     Path(args.state_output).write_text(json.dumps(asdict(state), ensure_ascii=False, indent=2), encoding="utf-8")
     Path(args.result_output).write_text(json.dumps(state.output, ensure_ascii=False, indent=2), encoding="utf-8")
     print(f"state written to: {args.state_output}")
     print(f"result written to: {args.result_output}")
+    if exit_code:
+        raise SystemExit(exit_code)
 
 
 if __name__ == "__main__":
