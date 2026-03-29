@@ -56,26 +56,26 @@
 
 ### 2.1 tsconfig alias resolution
 
-- [ ] 支持根 `tsconfig.json` 之外的 `extends`。
-- [ ] 支持多层 tsconfig 合并。
-- [ ] 支持 monorepo root + package tsconfig。
-- [ ] 支持一个 alias 对应多个 target path。
+- [x] 支持根 `tsconfig.json` 之外的 `extends`。
+- [x] 支持多层 tsconfig 合并。
+- [x] 支持 monorepo root + package tsconfig。
+- [x] 支持一个 alias 对应多个 target path。
 - [ ] 支持 wildcard edge cases。
 - [ ] 为 alias 解析失败增加更明确的诊断信息。
 
 ### 2.2 barrel export resolution
 
-- [ ] 支持 multi-hop barrel chain。
-- [ ] 支持 `export * from './x'` 多层追踪。
-- [ ] 支持 `export { A } from './x'` 的符号映射。
-- [ ] 增加循环引用保护。
+- [x] 支持 multi-hop barrel chain。
+- [x] 支持 `export * from './x'` 多层追踪。
+- [x] 支持 `export { A } from './x'` 的符号映射。
+- [x] 增加循环引用保护。
 - [ ] 在 state 中保留 barrel resolution 证据，便于后续解释。
 
 ### 2.3 nested route parsing
 
-- [ ] 从当前启发式 path flatten 升级为真实 `children` 递归展开。
-- [ ] 支持 parent/child path 拼接。
-- [ ] 支持 layout route / wrapper route 的基础识别。
+- [x] 从当前启发式 path flatten 升级为真实 `children` 递归展开。
+- [x] 支持 parent/child path 拼接。
+- [x] 支持 layout route / wrapper route 的基础识别。
 - [ ] 支持 lazy route 和 route page binding 联动。
 - [ ] 为 route 无法绑定 page 的情况补充诊断信息。
 
@@ -142,9 +142,9 @@
 - [x] 新建 `fixtures/sample_app/`
 - [x] 新建 `fixtures/diffs/`
 - [x] 准备第一组 snapshot expected JSON
-- [ ] 为 `load_tsconfig_aliases` 补 `extends` 支持
-- [ ] 为 `ProjectScanner` 补多跳 barrel resolution
-- [ ] 为 route parsing 补真正的 children 递归展开
+- [x] 为 `load_tsconfig_aliases` 补 `extends` 支持
+- [x] 为 `ProjectScanner` 补多跳 barrel resolution
+- [x] 为 route parsing 补真正的 children 递归展开
 
 ## Done Log
 
@@ -155,3 +155,4 @@
 - [x] 更新 `SKILL.md` 中的运行方式
 - [x] 将最终输出契约切换为按排序输出的用例 JSON 数组
 - [x] 建立 Phase 1 的测试、fixture、snapshot 基线
+- [x] 完成 Phase 2 第一轮：alias extends、多目标 alias、multi-hop barrel、递归 nested routes

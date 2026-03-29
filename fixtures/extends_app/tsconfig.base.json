@@ -1,0 +1,9 @@
+{
+  "compilerOptions": {
+    "baseUrl": ".",
+    "paths": {
+      "@shared/*": ["src/shared/*"],
+      "@views/*": ["src/does-not-exist/*", "src/pages/*"]
+    }
+  }
+}

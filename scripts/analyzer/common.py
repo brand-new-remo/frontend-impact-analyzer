@@ -72,22 +72,15 @@ def confidence_to_priority(conf: str) -> str:
 
 
 def load_tsconfig_aliases(project_root: Path) -> Dict[str, List[str]]:
-    aliases: Dict[str, List[str]] = {"@/*": ["src/*"]}
     tsconfig = project_root / "tsconfig.json"
-    if not tsconfig.exists():
-        return aliases
-    try:
-        data = json.loads(safe_read_text(tsconfig) or "{}")
-        paths = (((data.get("compilerOptions") or {}).get("paths")) or {})
-        for key, values in paths.items():
-            if isinstance(values, list) and values:
-                aliases[key] = [str(v) for v in values]
-    except Exception:
-        pass
+    aliases: Dict[str, List[str]] = {"@/*": ["src/*"]}
+    if tsconfig.exists():
+        aliases.update(_load_tsconfig_aliases_from_file(project_root, tsconfig, set()))
     return aliases
 
 
-def resolve_alias_target(project_root: Path, raw_target: str, aliases: Dict[str, List[str]]) -> Optional[Path]:
+def resolve_alias_targets(project_root: Path, raw_target: str, aliases: Dict[str, List[str]]) -> List[Path]:
+    candidates: List[Path] = []
     for alias, values in aliases.items():
         alias_prefix = alias[:-1] if alias.endswith("*") else alias
         if not raw_target.startswith(alias_prefix):
@@ -95,6 +88,63 @@ def resolve_alias_target(project_root: Path, raw_target: str, aliases: Dict[str,
         suffix = raw_target[len(alias_prefix):]
         for pattern in values:
             real_prefix = pattern[:-1] if pattern.endswith("*") else pattern
-            candidate = (project_root / (real_prefix + suffix)).resolve()
-            return candidate
-    return None
+            raw_path = real_prefix + suffix
+            candidate = Path(raw_path)
+            if not candidate.is_absolute():
+                candidate = (project_root / raw_path).resolve()
+            candidates.append(candidate)
+    return candidates
+
+
+def _load_tsconfig_aliases_from_file(project_root: Path, config_path: Path, seen: set[Path]) -> Dict[str, List[str]]:
+    resolved_path = config_path.resolve()
+    if resolved_path in seen or not resolved_path.exists():
+        return {}
+
+    seen.add(resolved_path)
+    data = _read_json_file(resolved_path)
+    aliases: Dict[str, List[str]] = {}
+
+    extends_value = data.get("extends")
+    if isinstance(extends_value, str):
+        parent_config = _resolve_extended_tsconfig(resolved_path.parent, extends_value)
+        if parent_config:
+            aliases.update(_load_tsconfig_aliases_from_file(project_root, parent_config, seen))
+
+    compiler_options = data.get("compilerOptions") or {}
+    paths = compiler_options.get("paths") or {}
+    base_url = compiler_options.get("baseUrl", ".")
+    config_base = (resolved_path.parent / base_url).resolve()
+
+    for key, values in paths.items():
+        if isinstance(values, list) and values:
+            aliases[key] = [_normalize_alias_target(project_root, config_base, str(value)) for value in values]
+
+    return aliases
+
+
+def _read_json_file(path: Path) -> Dict:
+    try:
+        return json.loads(safe_read_text(path) or "{}")
+    except Exception:
+        return {}
+
+
+def _resolve_extended_tsconfig(config_dir: Path, extends_value: str) -> Optional[Path]:
+    candidate = Path(extends_value)
+    if not candidate.suffix:
+        candidate = Path(f"{extends_value}.json")
+    if candidate.is_absolute():
+        return candidate
+    return (config_dir / candidate).resolve()
+
+
+def _normalize_alias_target(project_root: Path, config_base: Path, value: str) -> str:
+    target = Path(value)
+    if not target.is_absolute():
+        target = (config_base / target).resolve()
+
+    try:
+        return normalize_path(str(target.relative_to(project_root)))
+    except Exception:
+        return normalize_path(str(target))

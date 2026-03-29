@@ -25,16 +25,14 @@ def test_impact_engine_traces_shared_component_to_page():
     impacts, unresolved = analyzer.analyze_file(changed_file)
 
     assert unresolved is None
-    assert len(impacts) == 2
-    assert all(impact.page_file == "src/pages/users/UserListPage.tsx" for impact in impacts)
-    assert {impact.route_path for impact in impacts} == {"/users", "/users/detail"}
-    assert all(impact.impact_type == "indirect" for impact in impacts)
-    assert all(impact.confidence == "medium" for impact in impacts)
-    assert all(
-        impact.trace == [
-            "src/components/shared/SearchForm.tsx",
-            "src/pages/users/UserListPage.tsx",
-        ]
-        for impact in impacts
-    )
-    assert all(impact.semantic_tags == ["submit", "form", "button", "disabled-state"] for impact in impacts)
+    assert len(impacts) == 1
+    impact = impacts[0]
+    assert impact.page_file == "src/pages/users/UserListPage.tsx"
+    assert impact.route_path == "/users"
+    assert impact.impact_type == "indirect"
+    assert impact.confidence == "medium"
+    assert impact.trace == [
+        "src/components/shared/SearchForm.tsx",
+        "src/pages/users/UserListPage.tsx",
+    ]
+    assert impact.semantic_tags == ["submit", "form", "button", "disabled-state"]
