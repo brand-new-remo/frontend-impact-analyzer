@@ -18,28 +18,24 @@ Analyze requirement text and git diff for React + React Router + Vite projects a
    - optional output paths
 4. Read:
    - `impact-analysis-state.json` for evidence, traces, logs, and unresolved items
-   - `impact-analysis-result.json` for the final JSON test cases
-5. Base the final answer on the generated JSON. Do not invent impacted pages that are not supported by traces or route evidence.
+   - `impact-analysis-result.json` for the final JSON case array
+5. Base the final answer on the generated JSON array. Do not invent impacted pages that are not supported by traces or route evidence.
 6. If confidence is low, keep it low and explain why.
 
 ## Output rules
 
-Return JSON with:
-- `summary`
-- `cases`
+Return a JSON array only.
 
-Each case should contain:
-- `moduleName`
-- `pageName`
-- `caseName`
-- `preconditions`
-- `testSteps`
-- `expectedResults`
-- `impactType`
-- `priority`
-- `impactReason`
-- `relatedFiles`
-- `confidence`
+Each item should contain:
+- `页面名`
+- `用例名称`
+- `测试步骤`
+- `预期结果`
+- `用例等级`
+- `用例可置信度`
+- `来源描述`
+
+The current skill only generates the case array. It does not execute test cases.
 
 ## Heuristics
 

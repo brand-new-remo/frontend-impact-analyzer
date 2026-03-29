@@ -83,15 +83,7 @@ class FrontendImpactAnalysisEngine:
         cases = TestCaseBuilder().build(page_impacts)
         self.recorder.log("build_cases", "done", f"generated {len(cases)} cases")
 
-        self.state.output = {
-            "summary": {
-                "affectedModules": affected_modules,
-                "affectedPages": affected_pages,
-                "affectedFunctions": affected_functions,
-                "riskLevel": "high" if any(x.confidence == "high" for x in page_impacts) else "medium",
-            },
-            "cases": [asdict(c) for c in cases],
-        }
+        self.state.output = [c.to_output_dict() for c in cases]
         return self.state
 
 

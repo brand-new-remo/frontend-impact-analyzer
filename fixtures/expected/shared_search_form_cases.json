@@ -1,0 +1,69 @@
+[
+  {
+    "页面名": "User List Page",
+    "用例名称": "User List Page 页面基础回归",
+    "测试步骤": [
+      "进入页面 User List Page",
+      "观察页面初始化渲染"
+    ],
+    "预期结果": [
+      "页面可正常加载",
+      "页面无报错、无白屏、无异常提示"
+    ],
+    "用例等级": "medium",
+    "用例可置信度": "medium",
+    "来源描述": "shared-component changed, traced to page through 2 hop(s), semantics: submit, form, button, disabled-state；关联路由: /users；变更文件: src/components/shared/SearchForm.tsx"
+  },
+  {
+    "页面名": "User List Page",
+    "用例名称": "User List Page 表单展示校验与提交流程验证",
+    "测试步骤": [
+      "进入页面 User List Page",
+      "填写表单",
+      "触发表单校验",
+      "提交表单"
+    ],
+    "预期结果": [
+      "表单字段展示正确",
+      "必填/格式校验符合预期",
+      "提交成功或失败提示符合预期"
+    ],
+    "用例等级": "medium",
+    "用例可置信度": "medium",
+    "来源描述": "shared-component changed, traced to page through 2 hop(s), semantics: submit, form, button, disabled-state；关联路由: /users；变更文件: src/components/shared/SearchForm.tsx"
+  },
+  {
+    "页面名": "User List Page",
+    "用例名称": "User List Page 按钮入口与点击行为验证",
+    "测试步骤": [
+      "进入页面 User List Page",
+      "定位相关按钮",
+      "点击按钮触发操作"
+    ],
+    "预期结果": [
+      "按钮展示符合预期",
+      "按钮可点击性符合预期",
+      "点击后行为符合需求"
+    ],
+    "用例等级": "medium",
+    "用例可置信度": "medium",
+    "来源描述": "shared-component changed, traced to page through 2 hop(s), semantics: submit, form, button, disabled-state；关联路由: /users；变更文件: src/components/shared/SearchForm.tsx"
+  },
+  {
+    "页面名": "User List Page",
+    "用例名称": "User List Page 禁用态与只读态验证",
+    "测试步骤": [
+      "进入页面 User List Page",
+      "观察控件禁用态或只读态",
+      "尝试触发操作"
+    ],
+    "预期结果": [
+      "禁用态展示正确",
+      "不可操作时拦截正确",
+      "可操作条件下行为恢复正常"
+    ],
+    "用例等级": "medium",
+    "用例可置信度": "medium",
+    "来源描述": "shared-component changed, traced to page through 2 hop(s), semantics: submit, form, button, disabled-state；关联路由: /users；变更文件: src/components/shared/SearchForm.tsx"
+  }
+]

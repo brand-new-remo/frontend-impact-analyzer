@@ -1,0 +1,13 @@
+feat(users): adjust shared search form
+
+diff --git a/src/components/shared/SearchForm.tsx b/src/components/shared/SearchForm.tsx
+index 1234567..89abcde 100644
+--- a/src/components/shared/SearchForm.tsx
++++ b/src/components/shared/SearchForm.tsx
+@@ -1,4 +1,5 @@
++const handleSubmit = () => {}
+ export default function SearchForm() {
+   return (
+-    <Form>
++    <Form onSubmit={handleSubmit}>
+       <Button disabled onClick={handleSubmit}>Search</Button>

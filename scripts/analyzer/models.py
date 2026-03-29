@@ -2,7 +2,17 @@ from __future__ import annotations
 
 import time
 from dataclasses import asdict, dataclass, field
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, TypedDict
+
+
+class CaseOutput(TypedDict):
+    页面名: str
+    用例名称: str
+    测试步骤: List[str]
+    预期结果: List[str]
+    用例等级: str
+    用例可置信度: str
+    来源描述: str
 
 
 @dataclass
@@ -67,17 +77,25 @@ class PageImpact:
 
 @dataclass
 class TestCase:
-    moduleName: str
-    pageName: str
-    caseName: str
-    preconditions: List[str]
-    testSteps: List[str]
-    expectedResults: List[str]
-    impactType: str
-    priority: str
-    impactReason: str
-    relatedFiles: List[str]
+    page_name: str
+    case_name: str
+    test_steps: List[str]
+    expected_results: List[str]
+    case_level: str
     confidence: str
+    source_description: str
+    sort_priority: int = 99
+
+    def to_output_dict(self) -> CaseOutput:
+        return {
+            "页面名": self.page_name,
+            "用例名称": self.case_name,
+            "测试步骤": self.test_steps,
+            "预期结果": self.expected_results,
+            "用例等级": self.case_level,
+            "用例可置信度": self.confidence,
+            "来源描述": self.source_description,
+        }
 
 
 @dataclass
@@ -105,7 +123,7 @@ class AnalysisState:
         "affectedPages": [],
         "affectedFunctions": [],
     })
-    output: Dict = field(default_factory=dict)
+    output: List[CaseOutput] = field(default_factory=list)
     processLogs: List[Dict] = field(default_factory=list)
 
 

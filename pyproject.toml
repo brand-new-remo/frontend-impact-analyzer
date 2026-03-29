@@ -8,5 +8,10 @@ dependencies = [
   "tree-sitter-typescript>=0.23,<0.24",
 ]
 
+[dependency-groups]
+dev = [
+  "pytest>=8.4,<9",
+]
+
 [tool.uv]
 package = false
