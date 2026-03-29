@@ -28,3 +28,7 @@ export const routes = [
     assert facts.route_paths == ["/users", "detail"]
     assert facts.route_components == ["UserListPage", "LazyDetailPage"]
     assert facts.semantic_tags == ["route"]
+    assert facts.import_bindings == [
+        {"source": "@/pages/users/UserListPage", "kind": "default", "imported": "default", "local": "UserListPage"},
+        {"source": "react", "kind": "named", "imported": "lazy", "local": "lazy"},
+    ]

@@ -49,17 +49,25 @@ class GitDiffParser:
         changed_files: List[ChangedFile] = []
         current: Optional[ChangedFile] = None
         in_hunk = False
+        added_content: List[str] = []
+        removed_content: List[str] = []
 
         for raw_line in self.diff_text.splitlines():
             line = raw_line.rstrip("\n")
             m = self.DIFF_FILE_RE.match(line)
             if m:
                 if current:
+                    current.is_format_only = self._is_format_only_change(added_content, removed_content)
+                    if current.is_format_only:
+                        current.symbols = []
+                        current.semantic_tags = []
                     current.symbols = uniq_keep_order(current.symbols)
                     current.semantic_tags = uniq_keep_order(current.semantic_tags)
                     changed_files.append(current)
                 current = ChangedFile(path=m.group(2).replace('\\', '/'), change_type="modified")
                 in_hunk = False
+                added_content = []
+                removed_content = []
                 continue
             if current is None:
                 continue
@@ -76,12 +84,20 @@ class GitDiffParser:
                 continue
             if line.startswith("+") and not line.startswith("+++"):
                 current.added_lines += 1
-                self._inspect_line(current, line[1:])
+                payload = line[1:]
+                added_content.append(payload)
+                self._inspect_line(current, payload)
             elif line.startswith("-") and not line.startswith("---"):
                 current.removed_lines += 1
-                self._inspect_line(current, line[1:])
+                payload = line[1:]
+                removed_content.append(payload)
+                self._inspect_line(current, payload)
 
         if current:
+            current.is_format_only = self._is_format_only_change(added_content, removed_content)
+            if current.is_format_only:
+                current.symbols = []
+                current.semantic_tags = []
             current.symbols = uniq_keep_order(current.symbols)
             current.semantic_tags = uniq_keep_order(current.semantic_tags)
             changed_files.append(current)
@@ -95,3 +111,12 @@ class GitDiffParser:
         for tag, patterns in self.SEMANTIC_PATTERNS.items():
             if any(re.search(p, line, re.I) for p in patterns):
                 cf.semantic_tags.append(tag)
+
+    def _is_format_only_change(self, added_lines: List[str], removed_lines: List[str]) -> bool:
+        if not added_lines or not removed_lines:
+            return False
+        return self._normalize_for_format_compare(added_lines) == self._normalize_for_format_compare(removed_lines)
+
+    def _normalize_for_format_compare(self, lines: List[str]) -> str:
+        text = "".join(lines)
+        return re.sub(r"""[\s,'"`;"]+""", "", text)

@@ -83,12 +83,12 @@
 
 目标：减少误报，这是长期精度提升里最关键的一步。
 
-- [ ] 明确 diff 中变更的 exported symbol。
-- [ ] 识别 importer 实际使用了哪些 symbol，而不是仅仅 import 了文件。
-- [ ] 在 impact trace 中区分 file-level trace 和 symbol-level trace。
-- [ ] 避免“一个 shared file 被改动，所有 import 它的页面都被高置信度命中”。
-- [ ] 为 `PageImpact` 增加更细的 evidence 字段，记录具体命中的 symbol。
-- [ ] 为 symbol-level tracing 增加专门 fixture 和回归测试。
+- [x] 明确 diff 中变更的 exported symbol。
+- [x] 识别 importer 实际使用了哪些 symbol，而不是仅仅 import 了文件。
+- [x] 在 impact trace 中区分 file-level trace 和 symbol-level trace。
+- [x] 避免“一个 shared file 被改动，所有 import 它的页面都被高置信度命中”。
+- [x] 为 `PageImpact` 增加更细的 evidence 字段，记录具体命中的 symbol。
+- [x] 为 symbol-level tracing 增加专门 fixture 和回归测试。
 
 ## Phase 4: 增强 API 变更理解
 
@@ -128,7 +128,7 @@
 
 - [x] 先完成 Phase 1 的 fixtures + tests。
 - [x] 然后集中推进 Phase 2 的 alias / barrel / nested route。
-- [ ] 接着推进 Phase 3 的 symbol-level tracing。
+- [x] 接着推进 Phase 3 的 symbol-level tracing。
 - [ ] 再做 Phase 4 的 API field diff。
 - [ ] 最后增强 Phase 5 和 Phase 6。
 
@@ -157,3 +157,4 @@
 - [x] 建立 Phase 1 的测试、fixture、snapshot 基线
 - [x] 完成 Phase 2 第一轮：alias extends、多目标 alias、multi-hop barrel、递归 nested routes
 - [x] 完成 Phase 2 第二轮：lazy route 绑定、scanner diagnostics、barrel evidence state
+- [x] 完成 Phase 3 第一轮：symbol-level first-hop filtering、format-only diff skip、matched symbol evidence

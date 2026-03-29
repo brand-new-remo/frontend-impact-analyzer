@@ -33,6 +33,7 @@ class ChangedFile:
     semantic_tags: List[str] = field(default_factory=list)
     file_type: str = "unknown"
     module_guess: str = "unknown"
+    is_format_only: bool = False
 
 
 @dataclass
@@ -49,7 +50,11 @@ class RouteInfo:
 class FileAstFacts:
     file: str
     imports: List[str] = field(default_factory=list)
+    import_bindings: List[Dict] = field(default_factory=list)
+    resolved_import_bindings: List[Dict] = field(default_factory=list)
     reexports: List[str] = field(default_factory=list)
+    reexport_bindings: List[Dict] = field(default_factory=list)
+    resolved_reexport_bindings: List[Dict] = field(default_factory=list)
     exports: List[str] = field(default_factory=list)
     component_names: List[str] = field(default_factory=list)
     hook_names: List[str] = field(default_factory=list)
@@ -60,6 +65,7 @@ class FileAstFacts:
     lazy_imports: List[str] = field(default_factory=list)
     api_calls: List[str] = field(default_factory=list)
     semantic_tags: List[str] = field(default_factory=list)
+    identifier_counts: Dict[str, int] = field(default_factory=dict)
 
 
 @dataclass
@@ -73,6 +79,7 @@ class PageImpact:
     confidence: str
     impact_reason: str
     semantic_tags: List[str] = field(default_factory=list)
+    matched_symbols: List[str] = field(default_factory=list)
 
 
 @dataclass

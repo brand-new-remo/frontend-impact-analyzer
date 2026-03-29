@@ -28,3 +28,24 @@ index 1234567..89abcde 100644
     assert changed_file.removed_lines == 0
     assert changed_file.symbols == ["handleSubmit", "Form", "Button"]
     assert changed_file.semantic_tags == ["submit", "form", "button", "list-query", "disabled-state"]
+
+
+def test_diff_parser_marks_format_only_changes():
+    diff_text = """
+style(formatters): reformat formatter
+
+diff --git a/src/utils/formatters.ts b/src/utils/formatters.ts
+index 1234567..89abcde 100644
+--- a/src/utils/formatters.ts
++++ b/src/utils/formatters.ts
+@@ -1,1 +1,1 @@
+-export function formatDate(value: string) { return value; }
++export function formatDate( value: string ){return value}
+"""
+
+    _, changed_files = GitDiffParser(diff_text).parse()
+
+    assert len(changed_files) == 1
+    assert changed_files[0].is_format_only is True
+    assert changed_files[0].symbols == []
+    assert changed_files[0].semantic_tags == []

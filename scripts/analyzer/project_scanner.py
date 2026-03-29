@@ -33,11 +33,12 @@ class ProjectScanner:
             content = safe_read_text(file_path)
             facts = self.ast.parse_file(file_path, content)
             facts.file = rel
-            ast_facts[rel] = facts.__dict__
             route_records_by_file[rel] = self._extract_route_records(file_path, content)
 
             route_lazy_imports = [record["lazy_import"] for record in route_records_by_file[rel] if record.get("lazy_import")]
             resolved_imports: List[str] = []
+            resolved_import_bindings: List[Dict] = []
+            resolved_reexport_bindings: List[Dict] = []
             for raw in facts.imports + facts.reexports + facts.lazy_imports + route_lazy_imports:
                 resolved_paths = self._resolve_imports(file_path.parent, raw)
                 if not resolved_paths:
@@ -51,6 +52,16 @@ class ProjectScanner:
                     dep = rel_path(resolved, self.project_root)
                     resolved_imports.append(dep)
                     reverse_imports[dep].append(rel)
+            for binding in facts.import_bindings:
+                for resolved in self._resolve_imports(file_path.parent, binding.get("source", "")):
+                    resolved_import_bindings.append({**binding, "resolved": rel_path(resolved, self.project_root)})
+            for binding in facts.reexport_bindings:
+                for resolved in self._resolve_imports(file_path.parent, binding.get("source", "")):
+                    resolved_reexport_bindings.append({**binding, "resolved": rel_path(resolved, self.project_root)})
+
+            facts.resolved_import_bindings = resolved_import_bindings
+            facts.resolved_reexport_bindings = resolved_reexport_bindings
+            ast_facts[rel] = facts.__dict__
             imports[rel] = uniq_keep_order(resolved_imports)
 
             if facts.reexports:

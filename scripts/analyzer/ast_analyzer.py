@@ -38,16 +38,18 @@ class TsAstAnalyzer:
         if node_type == "import_statement":
             m = re.search(r"""['\"]([^'\"]+)['\"]""", txt)
             if m:
-                facts.imports.append(m.group(1))
+                source_name = m.group(1)
+                facts.imports.append(source_name)
+                facts.import_bindings.extend(self._parse_import_bindings(txt, source_name))
 
         if node_type in {"export_statement", "export_clause"}:
-            for name in re.findall(r"\b([A-Za-z_]\w*)\b", txt):
-                if name not in {"export", "default", "from", "as", "const", "function", "class"}:
-                    facts.exports.append(name)
+            facts.exports.extend(self._parse_export_names(txt))
             if "from" in txt:
                 m = re.search(r"""from\s+['\"]([^'\"]+)['\"]""", txt)
                 if m:
-                    facts.reexports.append(m.group(1))
+                    source_name = m.group(1)
+                    facts.reexports.append(source_name)
+                    facts.reexport_bindings.extend(self._parse_reexport_bindings(txt, source_name))
 
         if node_type == "function_declaration":
             name_node = node.child_by_field_name("name")
@@ -68,6 +70,11 @@ class TsAstAnalyzer:
                     facts.hook_names.append(name)
                 elif name[:1].isupper():
                     facts.component_names.append(name)
+
+        if node_type in {"identifier", "jsx_identifier"}:
+            name = txt.strip()
+            if name:
+                facts.identifier_counts[name] = facts.identifier_counts.get(name, 0) + 1
 
         if node_type in {"jsx_opening_element", "jsx_self_closing_element"}:
             tag_node = node.child_by_field_name("name")
@@ -104,6 +111,100 @@ class TsAstAnalyzer:
 
         for child in node.children:
             self._walk(child, source, facts)
+
+    def _parse_import_bindings(self, statement_text: str, source_name: str):
+        bindings = []
+        import_body = statement_text.split("from", 1)[0].replace("import", "", 1).strip()
+        if not import_body:
+            return bindings
+
+        named_match = re.search(r"\{([^}]*)\}", import_body)
+        named_body = named_match.group(1) if named_match else ""
+        body_without_named = re.sub(r"\{[^}]*\}", "", import_body).strip().strip(",")
+
+        if body_without_named:
+            if body_without_named.startswith("* as "):
+                bindings.append({
+                    "source": source_name,
+                    "kind": "namespace",
+                    "imported": "*",
+                    "local": body_without_named[len("* as "):].strip(),
+                })
+            else:
+                default_local = body_without_named.split(",", 1)[0].strip()
+                if default_local:
+                    bindings.append({
+                        "source": source_name,
+                        "kind": "default",
+                        "imported": "default",
+                        "local": default_local,
+                    })
+
+        if named_body:
+            for part in named_body.split(","):
+                chunk = part.strip()
+                if not chunk:
+                    continue
+                if " as " in chunk:
+                    imported, local = [item.strip() for item in chunk.split(" as ", 1)]
+                else:
+                    imported = local = chunk
+                bindings.append({
+                    "source": source_name,
+                    "kind": "named",
+                    "imported": imported,
+                    "local": local,
+                })
+        return bindings
+
+    def _parse_reexport_bindings(self, statement_text: str, source_name: str):
+        bindings = []
+        if "export * from" in statement_text:
+            bindings.append({
+                "source": source_name,
+                "kind": "wildcard",
+                "imported": "*",
+                "exported": "*",
+            })
+            return bindings
+
+        named_match = re.search(r"\{([^}]*)\}", statement_text)
+        if not named_match:
+            return bindings
+
+        for part in named_match.group(1).split(","):
+            chunk = part.strip()
+            if not chunk:
+                continue
+            if " as " in chunk:
+                imported, exported = [item.strip() for item in chunk.split(" as ", 1)]
+            else:
+                imported = exported = chunk
+            bindings.append({
+                "source": source_name,
+                "kind": "named",
+                "imported": imported,
+                "exported": exported,
+            })
+        return bindings
+
+    def _parse_export_names(self, statement_text: str):
+        names = []
+
+        named_match = re.search(r"export\s*\{([^}]*)\}", statement_text)
+        if named_match:
+            for part in named_match.group(1).split(","):
+                chunk = part.strip()
+                if not chunk:
+                    continue
+                exported_name = chunk.split(" as ", 1)[-1].strip()
+                names.append(exported_name)
+
+        direct_match = re.search(r"\bexport\s+(?:const|let|var|function|class)\s+([A-Za-z_]\w*)", statement_text)
+        if direct_match:
+            names.append(direct_match.group(1))
+
+        return names
 
     def _derive_semantic_tags(self, facts: FileAstFacts):
         tags = []
