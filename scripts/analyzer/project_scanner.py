@@ -17,13 +17,15 @@ class ProjectScanner:
         self.ast = TsAstAnalyzer()
         self.aliases = load_tsconfig_aliases(project_root)
 
-    def scan(self) -> Tuple[Dict[str, List[str]], Dict[str, List[str]], List[str], List[RouteInfo], Dict[str, Dict], Dict[str, List[str]], List[str]]:
+    def scan(self) -> Tuple[Dict[str, List[str]], Dict[str, List[str]], List[str], List[RouteInfo], Dict[str, Dict], Dict[str, List[str]], List[str], Dict[str, List[str]], List[Dict[str, str]]]:
         imports: Dict[str, List[str]] = {}
         reverse_imports: Dict[str, List[str]] = defaultdict(list)
         pages: List[str] = []
         routes: List[RouteInfo] = []
         ast_facts: Dict[str, Dict] = {}
         barrel_files: List[str] = []
+        barrel_evidence: Dict[str, List[str]] = {}
+        diagnostics: List[Dict[str, str]] = []
         route_records_by_file: Dict[str, List[Dict]] = {}
 
         for file_path in self._collect_source_files():
@@ -34,9 +36,18 @@ class ProjectScanner:
             ast_facts[rel] = facts.__dict__
             route_records_by_file[rel] = self._extract_route_records(file_path, content)
 
+            route_lazy_imports = [record["lazy_import"] for record in route_records_by_file[rel] if record.get("lazy_import")]
             resolved_imports: List[str] = []
-            for raw in facts.imports + facts.reexports + facts.lazy_imports:
-                for resolved in self._resolve_imports(file_path.parent, raw):
+            for raw in facts.imports + facts.reexports + facts.lazy_imports + route_lazy_imports:
+                resolved_paths = self._resolve_imports(file_path.parent, raw)
+                if not resolved_paths:
+                    diagnostics.append({
+                        "type": "unresolved-import",
+                        "file": rel,
+                        "target": raw,
+                        "message": f"unable to resolve import target: {raw}",
+                    })
+                for resolved in resolved_paths:
                     dep = rel_path(resolved, self.project_root)
                     resolved_imports.append(dep)
                     reverse_imports[dep].append(rel)
@@ -44,6 +55,7 @@ class ProjectScanner:
 
             if facts.reexports:
                 barrel_files.append(rel)
+                barrel_evidence[rel] = imports[rel]
             if self._is_page(rel, facts.__dict__):
                 pages.append(rel)
 
@@ -52,9 +64,9 @@ class ProjectScanner:
 
         for rel_file, route_records in route_records_by_file.items():
             if route_records:
-                routes.extend(self._expand_route_records(rel_file, route_records, imports, ast_facts, pages))
+                routes.extend(self._expand_route_records(rel_file, route_records, imports, ast_facts, pages, diagnostics))
 
-        return imports, reverse_imports, pages, routes, ast_facts, self.aliases, uniq_keep_order(barrel_files)
+        return imports, reverse_imports, pages, routes, ast_facts, self.aliases, uniq_keep_order(barrel_files), barrel_evidence, diagnostics
 
     def _collect_source_files(self) -> List[Path]:
         base = self.src_root if self.src_root.exists() else self.project_root
@@ -102,10 +114,10 @@ class ProjectScanner:
             return False
         return bool(facts.get("component_names") or facts.get("jsx_tags"))
 
-    def _expand_route_records(self, rel_file: str, route_records: List[Dict], imports: Dict[str, List[str]], ast_facts: Dict[str, Dict], pages: List[str]) -> List[RouteInfo]:
+    def _expand_route_records(self, rel_file: str, route_records: List[Dict], imports: Dict[str, List[str]], ast_facts: Dict[str, Dict], pages: List[str], diagnostics: List[Dict[str, str]]) -> List[RouteInfo]:
         results: List[RouteInfo] = []
         for record in route_records:
-            self._append_route_record(results, rel_file, record, imports, ast_facts, pages, parent_path=None, parent_route=None)
+            self._append_route_record(results, rel_file, record, imports, ast_facts, pages, diagnostics, parent_path=None, parent_route=None)
         return results
 
     def _guess_linked_page(self, rel_file: str, route_component: Optional[str], route_lazy_import: Optional[str], imports: Dict[str, List[str]], ast_facts: Dict[str, Dict], pages: List[str]) -> Optional[str]:
@@ -151,18 +163,29 @@ class ProjectScanner:
         imports: Dict[str, List[str]],
         ast_facts: Dict[str, Dict],
         pages: List[str],
+        diagnostics: List[Dict[str, str]],
         parent_path: Optional[str],
         parent_route: Optional[str],
     ) -> None:
         full_path = self._join_route_paths(parent_path, route_record.get("path"))
+        route_component = route_record.get("component")
+        route_lazy_import = route_record.get("lazy_import")
         linked_page = self._guess_linked_page(
             rel_file,
-            route_record.get("component"),
-            route_record.get("lazy_import"),
+            route_component,
+            route_lazy_import,
             imports,
             ast_facts,
             pages,
         )
+
+        if full_path and (route_component or route_lazy_import) and not linked_page:
+            diagnostics.append({
+                "type": "unbound-route",
+                "file": rel_file,
+                "target": full_path,
+                "message": f"unable to bind route to page: {full_path}",
+            })
 
         if full_path:
             results.append(
@@ -170,7 +193,7 @@ class ProjectScanner:
                     route_path=full_path,
                     source_file=rel_file,
                     linked_page=linked_page,
-                    route_component=route_record.get("component"),
+                    route_component=route_component,
                     parent_route=parent_route,
                     confidence="high" if linked_page else "medium",
                 )
@@ -184,6 +207,7 @@ class ProjectScanner:
                 imports,
                 ast_facts,
                 pages,
+                diagnostics,
                 parent_path=full_path or parent_path,
                 parent_route=full_path or parent_route,
             )

@@ -19,7 +19,7 @@ def test_impact_engine_traces_shared_component_to_page():
     changed_file.file_type = classifier.classify(changed_file.path)
     changed_file.module_guess = classifier.guess_module(changed_file.path)
 
-    imports, reverse_imports, pages, routes, ast_facts, _, _ = ProjectScanner(project_root).scan()
+    imports, reverse_imports, pages, routes, ast_facts, _, _, _, _ = ProjectScanner(project_root).scan()
     analyzer = ImpactAnalyzer(imports=imports, reverse_imports=reverse_imports, pages=pages, routes=routes, ast_facts=ast_facts)
 
     impacts, unresolved = analyzer.analyze_file(changed_file)

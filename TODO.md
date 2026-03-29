@@ -61,7 +61,7 @@
 - [x] 支持 monorepo root + package tsconfig。
 - [x] 支持一个 alias 对应多个 target path。
 - [ ] 支持 wildcard edge cases。
-- [ ] 为 alias 解析失败增加更明确的诊断信息。
+- [x] 为 alias 解析失败增加更明确的诊断信息。
 
 ### 2.2 barrel export resolution
 
@@ -69,15 +69,15 @@
 - [x] 支持 `export * from './x'` 多层追踪。
 - [x] 支持 `export { A } from './x'` 的符号映射。
 - [x] 增加循环引用保护。
-- [ ] 在 state 中保留 barrel resolution 证据，便于后续解释。
+- [x] 在 state 中保留 barrel resolution 证据，便于后续解释。
 
 ### 2.3 nested route parsing
 
 - [x] 从当前启发式 path flatten 升级为真实 `children` 递归展开。
 - [x] 支持 parent/child path 拼接。
 - [x] 支持 layout route / wrapper route 的基础识别。
-- [ ] 支持 lazy route 和 route page binding 联动。
-- [ ] 为 route 无法绑定 page 的情况补充诊断信息。
+- [x] 支持 lazy route 和 route page binding 联动。
+- [x] 为 route 无法绑定 page 的情况补充诊断信息。
 
 ## Phase 3: 从文件级 tracing 升级到符号级 tracing
 
@@ -127,7 +127,7 @@
 ## 近期推荐执行顺序
 
 - [x] 先完成 Phase 1 的 fixtures + tests。
-- [ ] 然后集中推进 Phase 2 的 alias / barrel / nested route。
+- [x] 然后集中推进 Phase 2 的 alias / barrel / nested route。
 - [ ] 接着推进 Phase 3 的 symbol-level tracing。
 - [ ] 再做 Phase 4 的 API field diff。
 - [ ] 最后增强 Phase 5 和 Phase 6。
@@ -156,3 +156,4 @@
 - [x] 将最终输出契约切换为按排序输出的用例 JSON 数组
 - [x] 建立 Phase 1 的测试、fixture、snapshot 基线
 - [x] 完成 Phase 2 第一轮：alias extends、多目标 alias、multi-hop barrel、递归 nested routes
+- [x] 完成 Phase 2 第二轮：lazy route 绑定、scanner diagnostics、barrel evidence state

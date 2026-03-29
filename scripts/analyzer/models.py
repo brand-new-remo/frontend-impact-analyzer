@@ -111,6 +111,8 @@ class AnalysisState:
         "astFacts": {},
         "aliases": {},
         "barrelFiles": [],
+        "barrelEvidence": {},
+        "diagnostics": [],
     })
     codeImpact: Dict = field(default_factory=lambda: {
         "fileClassifications": [],
@@ -143,7 +145,7 @@ class StateStore:
         self.state.parsedDiff["commitTypes"] = commit_types
         self.state.parsedDiff["changedFiles"] = [asdict(x) for x in changed_files]
 
-    def set_graph(self, imports, reverse_imports, pages, routes, ast_facts, aliases, barrel_files):
+    def set_graph(self, imports, reverse_imports, pages, routes, ast_facts, aliases, barrel_files, barrel_evidence, diagnostics):
         self.state.codeGraph["imports"] = imports
         self.state.codeGraph["reverseImports"] = reverse_imports
         self.state.codeGraph["pages"] = pages
@@ -151,6 +153,8 @@ class StateStore:
         self.state.codeGraph["astFacts"] = ast_facts
         self.state.codeGraph["aliases"] = aliases
         self.state.codeGraph["barrelFiles"] = barrel_files
+        self.state.codeGraph["barrelEvidence"] = barrel_evidence
+        self.state.codeGraph["diagnostics"] = diagnostics
 
     def set_file_classifications(self, changed_files):
         self.state.codeImpact["fileClassifications"] = [
