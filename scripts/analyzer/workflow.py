@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import json
 import re
+import shutil
 import subprocess
+import sys
 import time
 from pathlib import Path
 from typing import Dict, List, Optional
@@ -54,6 +56,8 @@ DEFAULT_CONFIG: Dict = {
         "maxFilesPerClusterContext": 8,
         "maxDocumentSnippetsPerCluster": 6,
         "maxSnippetChars": 5000,
+        "maxClusterContextChars": 60000,
+        "maxCommentEvidencePerCluster": 20,
     },
 }
 
@@ -130,6 +134,61 @@ def preflight(project_root: Path, config: Dict) -> Dict:
     }
 
 
+def doctor(project_root: Path, skill_root: Path) -> Dict:
+    checks: List[Dict] = []
+
+    uv_path = shutil.which("uv")
+    checks.append({
+        "name": "uv",
+        "required": True,
+        "status": "ok" if uv_path else "missing",
+        "message": f"found at {uv_path}" if uv_path else "uv is required for the recommended skill command",
+    })
+
+    checks.append({
+        "name": "python",
+        "required": True,
+        "status": "ok" if sys.version_info >= (3, 12) else "missing",
+        "message": f"Python {sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}",
+    })
+
+    for package_name, module_name in [
+        ("tree-sitter", "tree_sitter"),
+        ("tree-sitter-typescript", "tree_sitter_typescript"),
+    ]:
+        try:
+            __import__(module_name)
+            status = "ok"
+            message = "importable in current Python environment"
+        except Exception as exc:
+            status = "missing"
+            message = str(exc)
+        checks.append({
+            "name": package_name,
+            "required": True,
+            "status": status,
+            "message": message,
+        })
+
+    checks.append({
+        "name": "skill-root",
+        "required": True,
+        "status": "ok" if (skill_root / "SKILL.md").exists() and (skill_root / "scripts" / "front_end_impact_analyzer.py").exists() else "missing",
+        "message": normalize_path(str(skill_root)),
+    })
+
+    checks.append(_git_check(project_root))
+
+    missing = [item for item in checks if item["required"] and item["status"] != "ok"]
+    analyzer_script = skill_root / "scripts" / "front_end_impact_analyzer.py"
+    return {
+        "status": "ok" if not missing else "blocked",
+        "checks": checks,
+        "recommendedCommandPrefix": f'uv run --project "{skill_root}" python "{analyzer_script}"',
+        "blockingActions": [_doctor_action(item) for item in missing],
+    }
+
+
 def make_diff_file(
     project_root: Path,
     config: Dict,
@@ -158,6 +217,52 @@ def ensure_run_dir(manifest: Dict) -> Path:
     (run_dir / "cluster-context").mkdir(parents=True, exist_ok=True)
     (run_dir / "cluster-analysis").mkdir(parents=True, exist_ok=True)
     return run_dir
+
+
+def install_claude_agents(
+    project_root: Path,
+    templates_dir: Optional[Path] = None,
+    overwrite: bool = False,
+) -> Dict:
+    source_dir = templates_dir or Path(__file__).resolve().parents[2] / "agents" / "claude"
+    target_dir = project_root / ".claude" / "agents"
+    report = {
+        "sourceDir": normalize_path(str(source_dir)),
+        "targetDir": normalize_path(str(target_dir)),
+        "installed": [],
+        "skipped": [],
+        "status": "ok",
+        "message": "",
+    }
+
+    if not project_root.exists() or not project_root.is_dir():
+        report["status"] = "missing-project-root"
+        report["message"] = "Target project root does not exist or is not a directory."
+        return report
+
+    if not source_dir.exists() or not source_dir.is_dir():
+        report["status"] = "missing-source"
+        report["message"] = "Claude agent template directory does not exist."
+        return report
+
+    target_dir.mkdir(parents=True, exist_ok=True)
+    for source in sorted(source_dir.glob("*.md")):
+        target = target_dir / source.name
+        existed = target.exists()
+        if target.exists() and not overwrite:
+            report["skipped"].append({
+                "file": source.name,
+                "reason": "target exists; use --overwrite-claude-agents to replace it",
+            })
+            continue
+        shutil.copyfile(source, target)
+        report["installed"].append({
+            "file": source.name,
+            "action": "overwritten" if existed and overwrite else "installed",
+        })
+
+    report["message"] = f"installed {len(report['installed'])}, skipped {len(report['skipped'])}"
+    return report
 
 
 def write_json(path: Path, data) -> None:
@@ -203,6 +308,21 @@ def _git_check(project_root: Path) -> Dict:
             "status": "missing",
             "message": str(exc),
         }
+
+
+def _doctor_action(item: Dict) -> str:
+    name = item.get("name")
+    if name == "uv":
+        return "Install uv, then run analyzer commands with `uv run --project <skill_root> ...`."
+    if name == "python":
+        return "Use Python 3.12 or newer."
+    if name in {"tree-sitter", "tree-sitter-typescript"}:
+        return "Run `uv sync --project <skill_root>` or use `uv run --project <skill_root> ...` so dependencies are available."
+    if name == "skill-root":
+        return "Run commands with the absolute path to the frontend-impact-analyzer skill root."
+    if name == "git":
+        return "Set `--project-root` to the target git worktree."
+    return item.get("message", "Resolve missing requirement.")
 
 
 def _ignore_pathspecs(config: Dict, extra_ignore_dirs: List[str]) -> List[str]:

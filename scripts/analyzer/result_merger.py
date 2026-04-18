@@ -4,6 +4,7 @@ import json
 from pathlib import Path
 from typing import Dict, List, Tuple
 
+from .cluster_analysis_validator import ClusterAnalysisValidator
 from .common import uniq_keep_order
 from .workflow import write_json
 
@@ -17,21 +18,26 @@ class ClusterAnalysisMerger:
         coverage = self._read_json(self.run_dir / "90-coverage-report.json", {})
         clusters = self._read_json(self.run_dir / "05-change-clusters.json", {}).get("clusters", [])
         analyses = self._read_cluster_analyses()
+        route_display_names = self._route_display_names()
+        validator = ClusterAnalysisValidator()
 
         analysis_by_cluster = {item.get("clusterId"): item for item in analyses if item.get("clusterId")}
         cases: List[Dict] = []
         cluster_summaries = []
+        validation_reports = []
 
         for cluster in clusters:
             cluster_id = cluster["clusterId"]
             analysis = analysis_by_cluster.get(cluster_id)
             if analysis:
+                validation_report = validator.validate(cluster, analysis)
+                validation_reports.append(validation_report)
                 normalized_cases = [
-                    self._normalize_analysis_case(cluster, analysis, case)
+                    self._normalize_analysis_case(cluster, analysis, case, route_display_names)
                     for case in analysis.get("cases", [])
                 ]
                 cases.extend(normalized_cases)
-                cluster_summaries.append(self._analysis_summary(cluster, analysis, len(normalized_cases)))
+                cluster_summaries.append(self._analysis_summary(cluster, analysis, len(normalized_cases), validation_report))
             else:
                 cluster_summaries.append({
                     "clusterId": cluster_id,
@@ -59,19 +65,28 @@ class ClusterAnalysisMerger:
                 "missingAnalysisClusterCount": max(0, len(clusters) - len(used_analyses)),
                 "caseCount": len(cases),
                 "fallbackCaseCount": 0,
-                "affectedPages": uniq_keep_order([
+                "validationIssueCount": sum(item["issueCount"] for item in validation_reports),
+                "validationWarningCount": sum(item["warningCount"] for item in validation_reports),
+                "candidatePages": uniq_keep_order([
                     page for cluster in clusters for page in cluster.get("candidatePages", [])
                 ]),
-                "affectedRoutes": uniq_keep_order([
+                "candidateRoutes": uniq_keep_order([
                     route for cluster in clusters for route in cluster.get("candidateRoutes", [])
                 ]),
             },
             "coverage": coverage,
             "clusters": cluster_summaries,
             "clusterAnalyses": used_analyses,
+            "validationReports": validation_reports,
             "orphanClusterAnalyses": orphan_analyses,
             "cases": cases,
             "fallbackCases": [],
+            "nextStepsForClaude": [
+                "Use the case-refiner agent when available to refine final cases after merge.",
+                "Read 99-merged-result.json, validationReports, 05-change-clusters.json, and cluster-analysis/*.analysis.json.",
+                "Write 99-refined-cases.json matching schemas/refined-cases.schema.json.",
+                "Only improve wording, dedupe, split, remove, or reorder cases without changing case intent, user flow, scope, evidence, priority, or confidence.",
+            ],
         }
 
     def write(self, output_path: Path, fallback_result: Dict | None = None) -> Dict:
@@ -92,7 +107,7 @@ class ClusterAnalysisMerger:
                 analyses.append(item)
         return analyses
 
-    def _normalize_analysis_case(self, cluster: Dict, analysis: Dict, case: Dict) -> Dict:
+    def _normalize_analysis_case(self, cluster: Dict, analysis: Dict, case: Dict, route_display_names: Dict[str, str]) -> Dict:
         evidence = case.get("evidence") or []
         if not evidence:
             evidence = analysis.get("codeEvidenceUsed", []) + analysis.get("docEvidenceUsed", [])
@@ -100,9 +115,11 @@ class ClusterAnalysisMerger:
             "clusterId": cluster["clusterId"],
             "caseSource": "cluster-analysis",
             "moduleName": case.get("moduleName") or self._module_from_cluster(cluster),
-            "pageName": case.get("pageName") or self._page_from_cluster(cluster),
+            "pageName": case.get("pageName") or self._display_page_from_cluster(cluster, route_display_names),
             "routePath": case.get("routePath") or self._first(cluster.get("candidateRoutes", [])),
             "caseName": case.get("caseName") or case.get("用例名称") or "",
+            "businessGoal": case.get("businessGoal") or "",
+            "entry": case.get("entry") or {},
             "preconditions": case.get("preconditions") or case.get("前置条件") or [],
             "testSteps": case.get("testSteps") or case.get("测试步骤") or [],
             "expectedResults": case.get("expectedResults") or case.get("预期结果") or [],
@@ -116,7 +133,7 @@ class ClusterAnalysisMerger:
             "uncertainties": case["uncertainties"] if "uncertainties" in case else analysis.get("uncertainties", []),
         }
 
-    def _analysis_summary(self, cluster: Dict, analysis: Dict, case_count: int) -> Dict:
+    def _analysis_summary(self, cluster: Dict, analysis: Dict, case_count: int, validation_report: Dict) -> Dict:
         return {
             "clusterId": cluster["clusterId"],
             "title": cluster.get("title", ""),
@@ -127,6 +144,9 @@ class ClusterAnalysisMerger:
             "caseCount": case_count,
             "confidence": analysis.get("confidence") or cluster.get("confidence", "medium"),
             "uncertainties": analysis.get("uncertainties", []),
+            "validationStatus": validation_report.get("status", "pass"),
+            "validationIssueCount": validation_report.get("issueCount", 0),
+            "validationWarningCount": validation_report.get("warningCount", 0),
         }
 
     def _dedupe_cases(self, cases: List[Dict]) -> List[Dict]:
@@ -171,6 +191,12 @@ class ClusterAnalysisMerger:
         page = self._first(cluster.get("candidatePages", []))
         return Path(page).stem if page else cluster.get("title", "")
 
+    def _display_page_from_cluster(self, cluster: Dict, route_display_names: Dict[str, str]) -> str:
+        for route in cluster.get("candidateRoutes", []):
+            if route_display_names.get(route):
+                return route_display_names[route]
+        return self._page_from_cluster(cluster)
+
     def _first(self, items: List[str]) -> str:
         return items[0] if items else ""
 
@@ -179,3 +205,12 @@ class ClusterAnalysisMerger:
             return json.loads(path.read_text(encoding="utf-8"))
         except Exception:
             return default
+
+    def _route_display_names(self) -> Dict[str, str]:
+        state = self._read_json(self.run_dir / "98-analysis-state.json", {})
+        routes = state.get("codeGraph", {}).get("routes", [])
+        return {
+            item.get("route_path"): item.get("display_name")
+            for item in routes
+            if item.get("route_path") and item.get("display_name")
+        }

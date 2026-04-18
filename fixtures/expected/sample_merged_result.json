@@ -11,10 +11,12 @@
     "missingAnalysisClusterCount": 0,
     "caseCount": 2,
     "fallbackCaseCount": 0,
-    "affectedPages": [
+    "validationIssueCount": 0,
+    "validationWarningCount": 0,
+    "candidatePages": [
       "src/pages/users/UserListPage.tsx"
     ],
-    "affectedRoutes": [
+    "candidateRoutes": [
       "/users"
     ]
   },
@@ -37,7 +39,10 @@
       "confidence": "medium",
       "uncertainties": [
         "fixture code does not show the submit handler updating query parameters or refreshing data, so list refresh is a candidate behavior to verify rather than a confirmed implementation detail"
-      ]
+      ],
+      "validationStatus": "pass",
+      "validationIssueCount": 0,
+      "validationWarningCount": 0
     }
   ],
   "clusterAnalyses": [
@@ -135,6 +140,16 @@
       "analysisFile": "__RUN_DIR__/cluster-analysis/cluster-001.analysis.json"
     }
   ],
+  "validationReports": [
+    {
+      "clusterId": "cluster-001",
+      "status": "pass",
+      "issueCount": 0,
+      "warningCount": 0,
+      "issues": [],
+      "warnings": []
+    }
+  ],
   "orphanClusterAnalyses": [],
   "cases": [
     {
@@ -144,6 +159,8 @@
       "pageName": "User List Page",
       "routePath": "/users",
       "caseName": "用户列表搜索表单提交入口验证",
+      "businessGoal": "",
+      "entry": {},
       "preconditions": [
         "用户列表页可访问"
       ],
@@ -184,6 +201,8 @@
       "pageName": "User List Page",
       "routePath": "/users",
       "caseName": "用户列表搜索按钮禁用态下的提交拦截验证",
+      "businessGoal": "",
+      "entry": {},
       "preconditions": [
         "用户列表页可访问",
         "搜索按钮存在禁用态"
@@ -213,5 +232,11 @@
       "uncertainties": []
     }
   ],
-  "fallbackCases": []
+  "fallbackCases": [],
+  "nextStepsForClaude": [
+    "Use the case-refiner agent when available to refine final cases after merge.",
+    "Read 99-merged-result.json, validationReports, 05-change-clusters.json, and cluster-analysis/*.analysis.json.",
+    "Write 99-refined-cases.json matching schemas/refined-cases.schema.json.",
+    "Only improve wording, dedupe, split, remove, or reorder cases without changing case intent, user flow, scope, evidence, priority, or confidence."
+  ]
 }

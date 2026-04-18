@@ -52,6 +52,8 @@
           "pageName": {"type": "string"},
           "routePath": {"type": "string"},
           "caseName": {"type": "string"},
+          "businessGoal": {"type": "string"},
+          "entry": {"type": "object"},
           "preconditions": {
             "type": "array",
             "items": {"type": "string"}

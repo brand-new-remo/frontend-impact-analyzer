@@ -1,5 +1,10 @@
 from __future__ import annotations
 
+# Deprecated: template case generation is not part of the main workflow.
+# Final QA cases must come from Claude-written cluster-analysis files and then
+# be merged by result_merger.py. Keep this module only as historical reference
+# until old integrations are removed.
+
 import re
 from typing import List
 

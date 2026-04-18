@@ -6,28 +6,32 @@ This skill is designed for Claude Code / Codex style agent-to-tool usage.
 
 The analyzer now produces an analysis package plus run artifacts:
 
-- `impact-analysis-result.json`: summary, coverage, clusters, empty initial cases, next steps
-- `impact-analysis-merged-result.json`: final merged result after Claude cluster analyses
-- `impact-analysis-state.json`: full state and graph evidence
+- `<runDir>/99-final-result.json`: summary, coverage, clusters, empty initial cases, next steps
+- `<runDir>/99-merged-result.json`: final merged result after Claude cluster analyses
 - `<runDir>/05-change-clusters.json`: cluster overview
 - `<runDir>/06-cluster-analysis-tasks.md`: cluster work queue for Claude Code
 - `<runDir>/cluster-context/*.json`: focused evidence packs for cluster-level reasoning
+- `<runDir>/98-analysis-state.json`: state snapshot used by merge for route display names and graph evidence
 
 ## Recommended Agent Pattern
 
 1. Check whether `impact-analyzer.config.json` exists.
 2. If it does not exist, create it with `--init-config` or ask the user before creating it.
 3. Run or inspect preflight through a normal analysis run.
-4. If required repo wiki / requirements / specs are missing, stop and ask the user to generate or provide them.
-5. Ask which base branch and compare branch to diff, unless the user already provided them.
-6. Ask whether configured diff ignores are acceptable and whether extra ignored folders are needed.
-7. Generate the diff with `--make-diff`, or use the provided diff file.
-8. Run the analyzer.
-9. Read `impact-analysis-result.json`.
-10. Read the run artifact directory from CLI output or `00-run-manifest.json`.
-11. Read `06-cluster-analysis-tasks.md`.
-12. For large diffs, use clusters as the primary workflow.
-13. After writing cluster-analysis files, run merge and use the merged `cases` as the final cases.
+4. Ask whether to install the bundled Claude Code subagent templates into the target project's `.claude/agents/` directory.
+5. If the user confirms, run `--install-claude-agents`; only use `--overwrite-claude-agents` after explicit confirmation.
+6. If required repo wiki / requirements / specs are missing, stop and ask the user to generate or provide them.
+7. Ask which base branch and compare branch to diff, unless the user already provided them.
+8. Ask whether configured diff ignores are acceptable and whether extra ignored folders are needed.
+9. Generate the diff with `--make-diff`, or use the provided diff file.
+10. Run the analyzer.
+11. Read `<runDir>/99-final-result.json`.
+12. Read the run artifact directory from CLI output or `00-run-manifest.json`.
+13. Read `06-cluster-analysis-tasks.md`.
+14. For large diffs, use clusters as the primary workflow.
+15. Analyze prioritized clusters one at a time and write `cluster-analysis/*.analysis.json`.
+16. After writing cluster-analysis files, run merge and use the merged `cases` as the final cases.
+17. Read `validationReports` and fix generic or unsupported cases when needed.
 
 ## Cluster Workflow
 
@@ -35,11 +39,11 @@ For each cluster with `needsDeepAnalysis=true`:
 
 1. Read `06-cluster-analysis-tasks.md`.
 2. Read `cluster-context/<clusterId>.json`.
-3. Inspect `diffEvidence`, `codeEvidence`, and `documentCandidates`.
-4. Open original repo-wiki / requirement / spec files when snippets are not enough.
-5. Use `.claude/agents/change-intent-judge.md` when available to determine the precise user-visible change.
-6. Use `.claude/agents/evidence-checker.md` when available to verify claims.
-7. Use `.claude/agents/case-writer.md` when available to write cases.
+3. Inspect `diffEvidence`, `traceEvidence`, `routeEvidence`, `flowHints`, `codeEvidence`, `commentEvidence`, `riskHints`, and `documentCandidates`.
+4. Open original repo-wiki / requirement / spec files when snippets or matched headings are not enough.
+5. Use the installed `.claude/agents/change-intent-judge.md` when available to determine the precise user-visible change.
+6. Use the installed `.claude/agents/evidence-checker.md` when available to verify claims.
+7. Use the installed `.claude/agents/case-writer.md` when available to write cases.
 8. Write uncertainty when evidence is weak.
 
 Recommended output file:
@@ -50,12 +54,8 @@ cluster-analysis/<clusterId>.analysis.json
 
 Merge command:
 
-```bash
-uv run python scripts/front_end_impact_analyzer.py \
-  --project-root <target_project_root> \
-  --merge-cluster-analysis \
-  --run-dir <run_artifact_dir> \
-  --result-output impact-analysis-merged-result.json
+```text
+uv run --project "<skill_root>" python "<skill_root>/scripts/front_end_impact_analyzer.py" --project-root "<target_project_root>" --merge-cluster-analysis --run-dir "<run_artifact_dir>"
 ```
 
 Merged output rules:
@@ -63,6 +63,17 @@ Merged output rules:
 - `cases` contains Claude cluster-analysis cases.
 - `fallbackCases` is a reserved compatibility field and should normally be empty.
 - Clusters without analysis produce no cases.
+- `validationReports` highlights generic language, missing evidence, and unclear user actions.
+
+After merge, use `case-refiner` when available to create `<runDir>/99-refined-cases.json`.
+
+Refinement rules:
+
+- Refine according to existing code evidence, document evidence, and validation reports.
+- Preserve every case's original intent, user operation flow, expected behavior, evidence, priority, and confidence.
+- Improve wording, dedupe, reorder, split overlong cases, or remove unsupported/generic cases.
+- Do not add new business scope, impacted pages, routes, expected results, or cases.
+- Output must match `schemas/refined-cases.schema.json`.
 
 Before merge:
 
@@ -93,7 +104,10 @@ Before merge:
 
 - Do not reclassify formatting-only changes as real impact.
 - Do not expand shared-component changes to unrelated pages.
+- Do not expand global/cross-cutting changes to every page. Use the global cluster to choose representative affected flows.
 - Do not add unsupported pages or routes.
+- Prefer routeEvidence display names from route comments/meta titles over English file-derived page names.
+- Treat `commentEvidence` as candidate evidence. Use it with code or document support, and record uncertainty if comments may be stale.
 - Do not invent requirement/spec behavior that is not in document evidence.
 - Do not generate Python template fallback cases.
 - After merge, use `cases`; inspect missing-analysis clusters for unfinished work.
@@ -103,7 +117,10 @@ Before merge:
 ## Good Downstream Usage
 
 - Use `03-diff-index.json` for global triage.
+- Check `noiseClassification` and `coverage.filesByNoiseKind` to understand which files were excluded from deep analysis as non-logic noise.
 - Use `05-change-clusters.json` to choose analysis order.
 - Use `06-cluster-analysis-tasks.md` as the actionable work queue.
 - Use `cluster-context/*.json` as compact evidence packs for Claude/subagents.
+- Check `contextBudget` to see whether snippets were truncated.
 - Use `90-coverage-report.json` to explain what was deeply analyzed, shallowly analyzed, or skipped.
+- For real project validation, follow `references/real-run-workflow.md` and fill `internal/REAL_RUN_REVIEW.md`.

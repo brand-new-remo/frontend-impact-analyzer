@@ -21,12 +21,23 @@ def test_engine_outputs_sorted_case_json_array_against_snapshot():
     assert state.meta["resultSchema"] == "schemas/analysis-result.schema.json"
     assert state.meta["statusSummary"] == {
         "changedFileCount": 1,
+        "candidatePageTraceCount": 1,
         "pageImpactCount": 1,
         "caseCount": 0,
         "unresolvedFileCount": 0,
         "diagnosticCount": 0,
     }
     assert state.workflow["preflight"]["status"] == "blocked"
+    assert state.candidateImpact == {
+        "candidateModules": ["users"],
+        "candidatePages": ["src/pages/users/UserListPage.tsx"],
+        "structuralHints": ["submit", "form", "button", "disabled-state"],
+    }
+    assert state.codeImpact["candidatePageTraces"] == state.codeImpact["pageImpacts"]
+    assert state.output["summary"]["candidateModules"] == ["users"]
+    assert state.output["summary"]["candidatePages"] == ["src/pages/users/UserListPage.tsx"]
+    assert state.output["summary"]["structuralHints"] == ["submit", "form", "button", "disabled-state"]
+    assert "affectedFunctions" not in state.output["summary"]
     assert state.output["summary"]["caseCount"] == 0
     assert state.output["summary"]["fallbackCaseCount"] == 0
     assert state.output["summary"]["missingAnalysisClusterCount"] == 1
@@ -34,6 +45,8 @@ def test_engine_outputs_sorted_case_json_array_against_snapshot():
     assert state.output["coverage"]["totalChangedFiles"] == 1
     assert state.output["clusters"][0]["clusterId"] == "cluster-001"
     assert state.output["clusters"][0]["candidatePages"] == ["src/pages/users/UserListPage.tsx"]
+    assert state.output["clusters"][0]["contextFile"] == "cluster-context/cluster-001.json"
+    assert state.output["clusters"][0]["analysisOutputFile"] == "cluster-analysis/cluster-001.analysis.json"
     assert state.workflow["changeClusters"]["clusterCount"] == 1
     assert state.workflow["clusterContexts"][0]["clusterId"] == "cluster-001"
     assert state.codeImpact["unresolvedFiles"] == []
@@ -51,6 +64,7 @@ def test_schema_files_exist_and_are_valid_json():
     result_schema = json.loads((root / "schemas" / "case-array.schema.json").read_text(encoding="utf-8"))
     analysis_result_schema = json.loads((root / "schemas" / "analysis-result.schema.json").read_text(encoding="utf-8"))
     cluster_analysis_schema = json.loads((root / "schemas" / "cluster-analysis.schema.json").read_text(encoding="utf-8"))
+    refined_cases_schema = json.loads((root / "schemas" / "refined-cases.schema.json").read_text(encoding="utf-8"))
     state_schema = json.loads((root / "schemas" / "analysis-state.schema.json").read_text(encoding="utf-8"))
 
     assert result_schema["type"] == "array"
@@ -68,6 +82,8 @@ def test_schema_files_exist_and_are_valid_json():
     assert "fallbackCases" in analysis_result_schema["required"]
     assert cluster_analysis_schema["type"] == "object"
     assert "clusterId" in cluster_analysis_schema["required"]
+    assert refined_cases_schema["type"] == "object"
+    assert "guardrails" in refined_cases_schema["required"]
     assert state_schema["type"] == "object"
     assert "meta" in state_schema["required"]
     assert state_schema["properties"]["output"]["$ref"] == "analysis-result.schema.json"

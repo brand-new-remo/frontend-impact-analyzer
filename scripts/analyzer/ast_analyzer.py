@@ -17,9 +17,10 @@ class TsAstAnalyzer:
 
     def parse_file(self, file_path: Path, source: str) -> FileAstFacts:
         parser = self.tsx_parser if file_path.suffix.lower() in {".tsx", ".jsx"} else self.ts_parser
-        tree = parser.parse(source.encode("utf-8"))
+        source_bytes = source.encode("utf-8")
+        tree = parser.parse(source_bytes)
         facts = FileAstFacts(file=str(file_path).replace('\\', '/'))
-        self._walk(tree.root_node, source, facts)
+        self._walk(tree.root_node, source_bytes, facts)
         for attr in [
             "imports", "reexports", "exports", "component_names", "hook_names", "jsx_tags",
             "jsx_props", "route_paths", "route_components", "lazy_imports", "api_calls", "semantic_tags"
@@ -28,10 +29,10 @@ class TsAstAnalyzer:
         facts.semantic_tags = uniq_keep_order(self._derive_semantic_tags(facts))
         return facts
 
-    def _text(self, node, source: str) -> str:
-        return source[node.start_byte:node.end_byte]
+    def _text(self, node, source: bytes) -> str:
+        return source[node.start_byte:node.end_byte].decode("utf-8", errors="ignore")
 
-    def _walk(self, node, source: str, facts: FileAstFacts):
+    def _walk(self, node, source: bytes, facts: FileAstFacts):
         node_type = node.type
         txt = self._text(node, source)
 

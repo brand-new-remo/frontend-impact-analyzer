@@ -26,6 +26,8 @@ class ChangeClusterBuilder:
                 "addedLines": cf.added_lines,
                 "removedLines": cf.removed_lines,
                 "isFormatOnly": cf.is_format_only,
+                "noiseClassification": cf.noise_classification,
+                "globalClassification": cf.global_classification,
                 "symbols": cf.symbols,
                 "semanticTags": cf.semantic_tags,
                 "apiChanges": cf.api_changes,
@@ -70,6 +72,8 @@ class ChangeClusterBuilder:
                 "changeType": cf.change_type,
                 "fileType": cf.file_type,
                 "moduleGuess": cf.module_guess,
+                "noiseClassification": cf.noise_classification,
+                "globalClassification": cf.global_classification,
                 "symbols": cf.symbols,
                 "semanticTags": semantic_tags,
                 "apiChanges": cf.api_changes,
@@ -88,6 +92,11 @@ class ChangeClusterBuilder:
     def build_clusters(self, seeds_data: Dict, max_deep_clusters: int = 30) -> Dict:
         grouped: Dict[Tuple[str, str], List[Dict]] = defaultdict(list)
         for seed in seeds_data.get("seeds", []):
+            if not seed.get("noiseClassification", {}).get("shouldAnalyze", True):
+                continue
+            if seed.get("globalClassification", {}).get("isGlobal"):
+                grouped[("global", seed["globalClassification"].get("kind") or "global-change")].append(seed)
+                continue
             if seed.get("candidatePages"):
                 for page in seed["candidatePages"]:
                     grouped[("page", page)].append(seed)
@@ -110,6 +119,7 @@ class ChangeClusterBuilder:
             clusters.append({
                 "clusterId": cluster_id,
                 "clusterKey": f"{kind}:{key}",
+                "scope": "global" if kind == "global" else "page-or-module",
                 "title": title,
                 "changedFiles": changed_files,
                 "changedSymbols": symbols,
@@ -117,6 +127,7 @@ class ChangeClusterBuilder:
                 "candidateRoutes": routes,
                 "semanticTags": semantic_tags,
                 "apiChanges": api_changes,
+                "globalClassification": self._merge_global_classification(seeds),
                 "reason": self._cluster_reason(kind, pages),
                 "confidence": confidence,
                 "needsDeepAnalysis": needs_deep,
@@ -134,6 +145,10 @@ class ChangeClusterBuilder:
         buckets: Dict[str, int] = defaultdict(int)
         for item in files:
             buckets[item.get("analysisBucket", "unknown")] += 1
+        noise_buckets: Dict[str, int] = defaultdict(int)
+        for item in files:
+            noise_kind = item.get("noiseClassification", {}).get("kind", "unknown")
+            noise_buckets[noise_kind] += 1
         clusters = clusters_data.get("clusters", [])
         return {
             "totalChangedFiles": len(files),
@@ -141,11 +156,16 @@ class ChangeClusterBuilder:
             "shallowAnalysisClusterCount": len([item for item in clusters if not item.get("needsDeepAnalysis")]),
             "ignoredOrShallowFileCount": len(diff_index.get("ignoredOrShallowFiles", [])),
             "filesByBucket": dict(sorted(buckets.items())),
+            "filesByNoiseKind": dict(sorted(noise_buckets.items())),
+            "noiseFileCount": len([item for item in files if not item.get("noiseClassification", {}).get("shouldAnalyze", True)]),
             "diagnosticCount": len(diagnostics),
             "warnings": diagnostics,
         }
 
     def _analysis_bucket(self, cf: ChangedFile) -> str:
+        noise = cf.noise_classification or {}
+        if not noise.get("shouldAnalyze", True):
+            return f"noise-{noise.get('kind', 'unknown')}"
         if cf.is_format_only:
             return "format-only"
         if cf.file_type == "non-source":
@@ -161,14 +181,23 @@ class ChangeClusterBuilder:
     def _bucket_reason(self, bucket: str) -> str:
         return {
             "format-only": "format-only change",
+            "noise-format-only": "only formatting changed",
+            "noise-comment-only": "only comments changed",
+            "noise-import-only": "only imports or re-exports changed",
+            "noise-lockfile": "dependency lockfile change",
+            "noise-generated-file": "generated artifact change",
+            "noise-test-only": "test/mock/fixture change; not a product behavior change by default",
+            "noise-style-only": "style change; keep outside logic analysis unless manually selected",
             "non-source": "non-source file",
             "shallow-style": "style change, keep as shallow risk unless tied to page evidence",
             "shallow-analysis": "weak impact signals; keep as shallow candidate",
         }.get(bucket, "not selected for deep analysis")
 
     def _seed_confidence(self, cf: ChangedFile, impacts: List[PageImpact]) -> str:
-        if cf.is_format_only:
+        if cf.is_format_only or not cf.noise_classification.get("shouldAnalyze", True):
             return "low"
+        if cf.global_classification.get("isGlobal"):
+            return "medium"
         if any(item.confidence == "high" for item in impacts):
             return "high"
         if impacts:
@@ -179,22 +208,43 @@ class ChangeClusterBuilder:
         confidences = [seed.get("confidence") for seed in seeds]
         if kind == "page" and "high" in confidences:
             return "high"
+        if kind == "global":
+            return "medium" if confidences else "low"
         if "medium" in confidences or "high" in confidences:
             return "medium"
         return "low"
 
     def _cluster_title(self, kind: str, key: str, pages: List[str], seeds: List[Dict]) -> str:
+        if kind == "global":
+            return f"Global {key.replace('-', ' ')} change cluster"
         if pages:
             return f"{title_from_file(pages[0])} impact cluster"
         modules = uniq_keep_order([seed.get("moduleGuess", "unknown") for seed in seeds])
         return f"{modules[0] if modules else module_name_from_path(key)} candidate impact cluster"
 
     def _cluster_reason(self, kind: str, pages: List[str]) -> str:
+        if kind == "global":
+            return "changed files are global or cross-cutting infrastructure; analyze separately without expanding to every page"
         if kind == "page":
             return "changed files trace to the same candidate page and should be analyzed together"
         if pages:
             return "changed files have overlapping page evidence"
         return "changed files lack page trace and are grouped by module plus semantic tags"
+
+    def _merge_global_classification(self, seeds: List[Dict]) -> Dict:
+        globals_ = [seed.get("globalClassification", {}) for seed in seeds if seed.get("globalClassification", {}).get("isGlobal")]
+        if not globals_:
+            return {}
+        kinds = uniq_keep_order([item.get("kind", "") for item in globals_ if item.get("kind")])
+        signals = uniq_keep_order([signal for item in globals_ for signal in item.get("signals", [])])
+        return {
+            "isGlobal": True,
+            "kinds": kinds,
+            "signals": signals,
+            "confidence": "medium",
+            "blastRadiusPolicy": "do-not-expand-to-all-pages",
+            "recommendedAnalysis": "Analyze cross-cutting behavior and representative flows; do not generate cases for every page.",
+        }
 
     def _extract_diff_previews(self, diff_text: str) -> Dict[str, Dict]:
         out: Dict[str, Dict] = {}

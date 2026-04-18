@@ -207,6 +207,9 @@ class ProjectScanner:
                     route_component=route_component,
                     parent_route=parent_route,
                     confidence="high" if linked_page else "medium",
+                    route_comment=route_record.get("route_comment", ""),
+                    display_name=route_record.get("display_name", ""),
+                    display_name_source=route_record.get("display_name_source", ""),
                 )
             )
 
@@ -234,25 +237,29 @@ class ProjectScanner:
 
     def _extract_route_records(self, file_path: Path, content: str) -> List[Dict]:
         parser = self.ast.tsx_parser if file_path.suffix.lower() in {".tsx", ".jsx"} else self.ast.ts_parser
-        tree = parser.parse(content.encode("utf-8"))
-        return self._collect_route_objects(tree.root_node, content)
+        source_bytes = content.encode("utf-8")
+        tree = parser.parse(source_bytes)
+        return self._collect_route_objects(tree.root_node, content, source_bytes)
 
-    def _collect_route_objects(self, node, source: str) -> List[Dict]:
+    def _collect_route_objects(self, node, source: str, source_bytes: bytes) -> List[Dict]:
         records: List[Dict] = []
         if node.type == "object":
-            record = self._build_route_record(node, source)
+            record = self._build_route_record(node, source, source_bytes)
             if record:
                 return [record]
         for child in node.children:
-            records.extend(self._collect_route_objects(child, source))
+            records.extend(self._collect_route_objects(child, source, source_bytes))
         return records
 
-    def _build_route_record(self, node, source: str) -> Optional[Dict]:
+    def _build_route_record(self, node, source: str, source_bytes: bytes) -> Optional[Dict]:
         path_value: Optional[str] = None
         component_value: Optional[str] = None
         lazy_import_value: Optional[str] = None
+        display_name_value: str = ""
+        display_name_source: str = ""
         child_records: List[Dict] = []
         has_route_signal = False
+        route_comment = self._nearest_route_comment(node, source, source_bytes)
 
         for child in node.children:
             if child.type != "pair":
@@ -262,8 +269,8 @@ class ProjectScanner:
             if key_node is None or value_node is None:
                 continue
 
-            key_text = self._strip_quotes(source[key_node.start_byte:key_node.end_byte].strip())
-            value_text = source[value_node.start_byte:value_node.end_byte].strip()
+            key_text = self._strip_quotes(self._node_text(source_bytes, key_node).strip())
+            value_text = self._node_text(source_bytes, value_node).strip()
 
             if key_text in {"path", "element", "component", "lazy", "children"}:
                 has_route_signal = True
@@ -276,10 +283,20 @@ class ProjectScanner:
                 component_value = self._extract_component_name(value_text)
             elif key_text == "lazy":
                 lazy_import_value = self._extract_lazy_import(value_text)
+            elif key_text in {"meta", "handle"}:
+                title = self._extract_title_like(value_text)
+                if title and not display_name_value:
+                    display_name_value = title
+                    display_name_source = f"{key_text}.title"
+            elif key_text in {"name", "title"}:
+                title = self._strip_quotes(value_text)
+                if title and not display_name_value and not self._looks_like_component_name(title):
+                    display_name_value = title
+                    display_name_source = key_text
             elif key_text == "children" and value_node.type == "array":
                 for grandchild in value_node.children:
                     if grandchild.type == "object":
-                        route_record = self._build_route_record(grandchild, source)
+                        route_record = self._build_route_record(grandchild, source, source_bytes)
                         if route_record:
                             child_records.append(route_record)
 
@@ -290,6 +307,9 @@ class ProjectScanner:
             "path": path_value,
             "component": component_value,
             "lazy_import": lazy_import_value,
+            "route_comment": route_comment,
+            "display_name": display_name_value or route_comment,
+            "display_name_source": display_name_source or ("route-comment" if route_comment else ""),
             "children": child_records,
         }
 
@@ -299,6 +319,55 @@ class ProjectScanner:
 
     def _extract_lazy_import(self, value_text: str) -> Optional[str]:
         return self._first_match(value_text, [r"""import\(\s*['"]([^'"]+)['"]\s*\)"""])
+
+    def _extract_title_like(self, value_text: str) -> str:
+        return self._first_match(value_text, [
+            r"""\btitle\s*:\s*['"]([^'"]+)['"]""",
+            r"""\bmenuName\s*:\s*['"]([^'"]+)['"]""",
+            r"""\bbreadcrumb\s*:\s*['"]([^'"]+)['"]""",
+            r"""\blabel\s*:\s*['"]([^'"]+)['"]""",
+        ]) or ""
+
+    def _nearest_route_comment(self, node, source: str, source_bytes: bytes) -> str:
+        lines = source.splitlines()
+        line_idx = max(0, node.start_point[0])
+        comments: List[str] = []
+        for idx in range(line_idx - 1, max(-1, line_idx - 5), -1):
+            stripped = lines[idx].strip()
+            if not stripped:
+                if comments:
+                    break
+                continue
+            comment = self._comment_text(stripped)
+            if comment:
+                comments.append(comment)
+                continue
+            if comments:
+                break
+        comments.reverse()
+
+        node_text = self._node_text(source_bytes, node)
+        for line in node_text.splitlines()[:4]:
+            comment = self._comment_text(line.strip())
+            if comment:
+                comments.append(comment)
+                break
+        return " / ".join(uniq_keep_order(comments))
+
+    def _comment_text(self, line: str) -> str:
+        if line.startswith("//"):
+            return line[2:].strip()
+        if line.startswith("/*") and line.endswith("*/"):
+            return line[2:-2].strip(" *")
+        if line.startswith("{/*") and line.endswith("*/}"):
+            return line[3:-3].strip(" *")
+        return ""
+
+    def _node_text(self, source_bytes: bytes, node) -> str:
+        return source_bytes[node.start_byte:node.end_byte].decode("utf-8", errors="ignore")
+
+    def _looks_like_component_name(self, value: str) -> bool:
+        return bool(re.match(r"^[A-Z][A-Za-z0-9_]*$", value))
 
     def _first_match(self, value_text: str, patterns: List[str]) -> Optional[str]:
         import re

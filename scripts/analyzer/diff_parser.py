@@ -5,6 +5,7 @@ from typing import List, Optional, Tuple
 
 from .common import uniq_keep_order
 from .models import ChangedFile
+from .noise_classifier import NoiseClassifier
 
 
 class GitDiffParser:
@@ -56,6 +57,7 @@ class GitDiffParser:
 
     def __init__(self, diff_text: str):
         self.diff_text = diff_text
+        self.noise_classifier = NoiseClassifier()
 
     def parse(self) -> Tuple[List[str], List[ChangedFile]]:
         commit_types = uniq_keep_order([m.group(1).lower() for m in self.COMMIT_TYPE_RE.finditer(self.diff_text)])
@@ -70,16 +72,7 @@ class GitDiffParser:
             m = self.DIFF_FILE_RE.match(line)
             if m:
                 if current:
-                    current.is_format_only = self._is_format_only_change(added_content, removed_content)
-                    if current.is_format_only:
-                        current.symbols = []
-                        current.semantic_tags = []
-                        current.api_changes = []
-                    else:
-                        current.api_changes = self._analyze_api_changes(current.path, added_content, removed_content)
-                        current.semantic_tags.extend(self._semantic_tags_from_api_changes(current.api_changes))
-                    current.symbols = uniq_keep_order(current.symbols)
-                    current.semantic_tags = uniq_keep_order(current.semantic_tags)
+                    self._finalize_changed_file(current, added_content, removed_content)
                     changed_files.append(current)
                 current = ChangedFile(path=m.group(2).replace('\\', '/'), change_type="modified")
                 in_hunk = False
@@ -111,19 +104,28 @@ class GitDiffParser:
                 self._inspect_line(current, payload)
 
         if current:
-            current.is_format_only = self._is_format_only_change(added_content, removed_content)
-            if current.is_format_only:
-                current.symbols = []
-                current.semantic_tags = []
-                current.api_changes = []
-            else:
-                current.api_changes = self._analyze_api_changes(current.path, added_content, removed_content)
-                current.semantic_tags.extend(self._semantic_tags_from_api_changes(current.api_changes))
-            current.symbols = uniq_keep_order(current.symbols)
-            current.semantic_tags = uniq_keep_order(current.semantic_tags)
+            self._finalize_changed_file(current, added_content, removed_content)
             changed_files.append(current)
 
         return commit_types, changed_files
+
+    def _finalize_changed_file(self, current: ChangedFile, added_content: List[str], removed_content: List[str]) -> None:
+        current.is_format_only = self._is_format_only_change(added_content, removed_content)
+        current.noise_classification = self.noise_classifier.classify(
+            current.path,
+            added_content,
+            removed_content,
+            current.is_format_only,
+        )
+        if not current.noise_classification.get("shouldAnalyze", True):
+            current.symbols = []
+            current.semantic_tags = []
+            current.api_changes = []
+        else:
+            current.api_changes = self._analyze_api_changes(current.path, added_content, removed_content)
+            current.semantic_tags.extend(self._semantic_tags_from_api_changes(current.api_changes))
+        current.symbols = uniq_keep_order(current.symbols)
+        current.semantic_tags = uniq_keep_order(current.semantic_tags)
 
     def _inspect_line(self, cf: ChangedFile, line: str):
         for pattern in self.SYMBOL_PATTERNS:

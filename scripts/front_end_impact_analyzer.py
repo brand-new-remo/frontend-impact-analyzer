@@ -11,12 +11,13 @@ from analyzer.cluster_tasks import build_cluster_task_markdown
 from analyzer.common import uniq_keep_order
 from analyzer.context_collector import ClusterContextCollector, DocumentIndexer
 from analyzer.diff_parser import GitDiffParser
+from analyzer.global_change_classifier import GlobalChangeClassifier
 from analyzer.impact_engine import ImpactAnalyzer
 from analyzer.models import AnalysisState, ProcessRecorder, StateStore
 from analyzer.project_scanner import ProjectScanner
 from analyzer.result_merger import ClusterAnalysisMerger
 from analyzer.source_classifier import SourceClassifier
-from analyzer.workflow import build_run_manifest, ensure_run_dir, load_config, make_diff_file, preflight, write_default_config, write_json
+from analyzer.workflow import build_run_manifest, doctor, ensure_run_dir, install_claude_agents, load_config, make_diff_file, preflight, write_default_config, write_json
 
 
 class FrontendImpactAnalysisEngine:
@@ -61,9 +62,11 @@ class FrontendImpactAnalysisEngine:
         self.recorder.log("parse_diff", "done", f"parsed {len(changed_files)} changed files")
 
         classifier = SourceClassifier()
+        global_classifier = GlobalChangeClassifier()
         for cf in changed_files:
             cf.file_type = classifier.classify(cf.path)
             cf.module_guess = classifier.guess_module(cf.path)
+            cf.global_classification = global_classifier.classify(cf.path, cf.file_type, cf.semantic_tags)
         self.store.set_diff(commit_types, changed_files)
         self.store.set_file_classifications(changed_files)
 
@@ -78,11 +81,17 @@ class FrontendImpactAnalysisEngine:
         page_impacts = []
         unresolved = []
         for cf in changed_files:
+            if not cf.noise_classification.get("shouldAnalyze", True):
+                continue
+            if cf.global_classification.get("isGlobal"):
+                continue
             impacts, unresolved_item = analyzer.analyze_file(cf)
             page_impacts.extend(impacts)
             if unresolved_item:
                 unresolved.append(unresolved_item)
-        self.state.codeImpact["pageImpacts"] = [asdict(x) for x in page_impacts]
+        candidate_page_traces = [asdict(x) for x in page_impacts]
+        self.state.codeImpact["candidatePageTraces"] = candidate_page_traces
+        self.state.codeImpact["pageImpacts"] = candidate_page_traces
         self.state.codeImpact["unresolvedFiles"] = unresolved
         self.state.codeImpact["sharedRisks"] = [
             {
@@ -90,16 +99,19 @@ class FrontendImpactAnalysisEngine:
                 "risk": "shared component change may affect multiple pages but should be validated based on actual trace and semantics",
                 "confidence": "medium",
             }
-            for cf in changed_files if cf.file_type == "shared-component"
+            for cf in changed_files if cf.file_type == "shared-component" and cf.noise_classification.get("shouldAnalyze", True)
         ]
         self.recorder.log("impact_analysis", "done", f"generated {len(page_impacts)} page impacts")
 
-        affected_modules = uniq_keep_order([x.module_name for x in page_impacts if x.module_name])
-        affected_pages = uniq_keep_order([x.page_file for x in page_impacts if x.page_file])
-        affected_functions = uniq_keep_order([tag for x in page_impacts for tag in x.semantic_tags])
-        self.state.businessImpact["affectedModules"] = affected_modules
-        self.state.businessImpact["affectedPages"] = affected_pages
-        self.state.businessImpact["affectedFunctions"] = affected_functions
+        candidate_modules = uniq_keep_order([x.module_name for x in page_impacts if x.module_name])
+        candidate_pages = uniq_keep_order([x.page_file for x in page_impacts if x.page_file])
+        structural_hints = uniq_keep_order([tag for x in page_impacts for tag in x.semantic_tags])
+        self.state.candidateImpact["candidateModules"] = candidate_modules
+        self.state.candidateImpact["candidatePages"] = candidate_pages
+        self.state.candidateImpact["structuralHints"] = structural_hints
+        self.state.businessImpact["affectedModules"] = candidate_modules
+        self.state.businessImpact["affectedPages"] = candidate_pages
+        self.state.businessImpact["affectedFunctions"] = structural_hints
 
         self.recorder.log("build_intermediates", "running", "start building diff index and change clusters")
         cluster_builder = ChangeClusterBuilder(self.diff_text)
@@ -117,6 +129,7 @@ class FrontendImpactAnalysisEngine:
             reverse_imports=reverse_imports,
             ast_facts=ast_facts,
             document_index=document_index,
+            routes=routes,
         )
         cluster_contexts = [context_collector.collect(cluster, diff_index) for cluster in clusters.get("clusters", [])]
         coverage = cluster_builder.build_coverage(diff_index, clusters, diagnostics)
@@ -136,6 +149,7 @@ class FrontendImpactAnalysisEngine:
         self.state.meta["analysisStatus"] = self._analysis_status(page_impacts, unresolved, diagnostics)
         self.state.meta["statusSummary"] = {
             "changedFileCount": len(changed_files),
+            "candidatePageTraceCount": len(page_impacts),
             "pageImpactCount": len(page_impacts),
             "caseCount": 0,
             "unresolvedFileCount": len(unresolved),
@@ -156,6 +170,7 @@ class FrontendImpactAnalysisEngine:
         for context in state.workflow["clusterContexts"]:
             write_json(run_dir / "cluster-context" / f"{context['clusterId']}.json", context)
         write_json(run_dir / "90-coverage-report.json", state.workflow["coverage"])
+        write_json(run_dir / "98-analysis-state.json", asdict(state))
         write_json(run_dir / "99-final-result.json", state.output)
 
     def _analysis_status(self, page_impacts, unresolved, diagnostics):
@@ -181,6 +196,8 @@ class FrontendImpactAnalysisEngine:
                 "semanticTags": cluster["semanticTags"],
                 "confidence": cluster["confidence"],
                 "needsDeepAnalysis": cluster["needsDeepAnalysis"],
+                "contextFile": f"cluster-context/{cluster['clusterId']}.json",
+                "analysisOutputFile": f"cluster-analysis/{cluster['clusterId']}.analysis.json",
                 "reason": cluster["reason"],
                 "recommendedClaudeTask": (
                     "Read this cluster's context JSON, inspect relevant original documents if snippets are insufficient, "
@@ -194,9 +211,9 @@ class FrontendImpactAnalysisEngine:
                 "analysisStatus": "running",
             },
             "summary": {
-                "affectedModules": self.state.businessImpact["affectedModules"],
-                "affectedPages": self.state.businessImpact["affectedPages"],
-                "affectedFunctions": self.state.businessImpact["affectedFunctions"],
+                "candidateModules": self.state.candidateImpact["candidateModules"],
+                "candidatePages": self.state.candidateImpact["candidatePages"],
+                "structuralHints": self.state.candidateImpact["structuralHints"],
                 "caseCount": 0,
                 "fallbackCaseCount": 0,
                 "missingAnalysisClusterCount": len([cluster for cluster in clusters.get("clusters", []) if cluster.get("needsDeepAnalysis")]),
@@ -227,31 +244,55 @@ def main():
     parser.add_argument("--config-file")
     parser.add_argument("--project-profile-file")
     parser.add_argument("--init-config", action="store_true")
+    parser.add_argument("--doctor", action="store_true")
     parser.add_argument("--make-diff", action="store_true")
     parser.add_argument("--base-branch")
     parser.add_argument("--compare-branch")
     parser.add_argument("--ignore-dir", action="append", default=[])
     parser.add_argument("--analysis-output-dir")
+    parser.add_argument("--install-claude-agents", action="store_true")
+    parser.add_argument("--overwrite-claude-agents", action="store_true")
     parser.add_argument("--merge-cluster-analysis", action="store_true")
     parser.add_argument("--run-dir")
-    parser.add_argument("--state-output", default="impact-analysis-state.json")
-    parser.add_argument("--result-output", default="impact-analysis-result.json")
+    parser.add_argument("--state-output")
+    parser.add_argument("--result-output")
     args = parser.parse_args()
 
     project_root = Path(args.project_root).resolve()
+    skill_root = Path(__file__).resolve().parents[1]
+    if args.doctor:
+        report = doctor(project_root, skill_root)
+        print(json.dumps(report, ensure_ascii=False, indent=2))
+        if report["status"] != "ok":
+            raise SystemExit(1)
+        return
+
     if args.merge_cluster_analysis:
         if not args.run_dir:
             raise SystemExit("--run-dir is required with --merge-cluster-analysis")
-        result = ClusterAnalysisMerger(Path(args.run_dir).resolve()).write(Path(args.result_output).resolve())
-        print(f"merged result written to: {args.result_output}")
+        run_dir = Path(args.run_dir).resolve()
+        output_path = Path(args.result_output).resolve() if args.result_output else run_dir / "99-merged-result.json"
+        result = ClusterAnalysisMerger(run_dir).write(output_path)
+        print(f"merged result written to: {output_path}")
         print(f"analysis status: {result['meta']['analysisStatus']}")
         return
 
     config_file = Path(args.config_file).resolve() if args.config_file else None
+    diff_file = Path(args.diff_file).resolve() if args.diff_file else None
     if args.init_config:
         path = write_default_config(project_root, config_file)
         print(f"config written to: {path}")
         return
+
+    if args.install_claude_agents:
+        report = install_claude_agents(project_root, overwrite=args.overwrite_claude_agents)
+        print(f"claude agents install status: {report['status']}")
+        print(f"claude agents target: {report['targetDir']}")
+        print(report["message"])
+        if report["status"] != "ok":
+            raise SystemExit(1)
+        if diff_file is None and not args.make_diff:
+            return
 
     config = load_config(project_root, config_file)
     if args.analysis_output_dir:
@@ -259,7 +300,6 @@ def main():
     if args.project_profile_file:
         config["paths"]["projectProfileFile"] = args.project_profile_file
 
-    diff_file = Path(args.diff_file).resolve() if args.diff_file else None
     if args.make_diff:
         base = args.base_branch or config["project"].get("defaultBaseBranch") or "main"
         compare = args.compare_branch or config["project"].get("defaultCompareBranch") or "HEAD"
@@ -272,6 +312,51 @@ def main():
     manifest = build_run_manifest(project_root, config, args.base_branch, args.compare_branch, diff_file)
     run_dir = ensure_run_dir(manifest)
     preflight_report = preflight(project_root, config)
+    if preflight_report.get("status") == "blocked":
+        write_json(run_dir / "00-run-manifest.json", manifest)
+        write_json(run_dir / "01-preflight-report.json", preflight_report)
+        blocked_result = {
+            "meta": {
+                "outputContract": "analysis-package-v2",
+                "runId": manifest.get("runId"),
+                "analysisStatus": "blocked",
+            },
+            "summary": {
+                "statusSummary": {
+                    "changedFileCount": 0,
+                    "candidatePageTraceCount": 0,
+                    "pageImpactCount": 0,
+                    "caseCount": 0,
+                    "unresolvedFileCount": 0,
+                    "diagnosticCount": len(preflight_report.get("blockingActions", [])),
+                },
+                "blockingActions": preflight_report.get("blockingActions", []),
+            },
+            "coverage": {},
+            "clusters": [],
+            "cases": [],
+            "fallbackCases": [],
+            "nextStepsForClaude": [
+                "Resolve the blocking preflight actions before running impact analysis.",
+                "If repo wiki is required, ask the user to generate it with the repo-wiki skill first.",
+            ],
+        }
+        blocked_state = {"meta": blocked_result["meta"], "workflow": {"manifest": manifest, "preflight": preflight_report}}
+        write_json(run_dir / "98-analysis-state.json", blocked_state)
+        write_json(run_dir / "99-final-result.json", blocked_result)
+        if args.state_output:
+            write_json(Path(args.state_output), blocked_state)
+        if args.result_output:
+            write_json(Path(args.result_output), blocked_result)
+        print(f"run artifacts written to: {run_dir}")
+        print(f"preflight blocked analysis: {', '.join(preflight_report.get('blockingActions', []))}")
+        print(f"state written to: {run_dir / '98-analysis-state.json'}")
+        print(f"result written to: {run_dir / '99-final-result.json'}")
+        if args.state_output:
+            print(f"state exported to: {args.state_output}")
+        if args.result_output:
+            print(f"result exported to: {args.result_output}")
+        raise SystemExit(2)
 
     engine = FrontendImpactAnalysisEngine(project_root, diff_text, requirement_text, config=config, manifest=manifest, preflight_report=preflight_report)
     try:
@@ -298,11 +383,17 @@ def main():
         state = engine.state
         exit_code = 1
 
-    Path(args.state_output).write_text(json.dumps(asdict(state), ensure_ascii=False, indent=2), encoding="utf-8")
-    Path(args.result_output).write_text(json.dumps(state.output, ensure_ascii=False, indent=2), encoding="utf-8")
+    if args.state_output:
+        write_json(Path(args.state_output), asdict(state))
+    if args.result_output:
+        write_json(Path(args.result_output), state.output)
     print(f"run artifacts written to: {run_dir}")
-    print(f"state written to: {args.state_output}")
-    print(f"result written to: {args.result_output}")
+    print(f"state written to: {run_dir / '98-analysis-state.json'}")
+    print(f"result written to: {run_dir / '99-final-result.json'}")
+    if args.state_output:
+        print(f"state exported to: {args.state_output}")
+    if args.result_output:
+        print(f"result exported to: {args.result_output}")
     if exit_code:
         raise SystemExit(exit_code)
 

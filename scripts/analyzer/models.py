@@ -35,6 +35,8 @@ class ChangedFile:
     file_type: str = "unknown"
     module_guess: str = "unknown"
     is_format_only: bool = False
+    noise_classification: Dict = field(default_factory=dict)
+    global_classification: Dict = field(default_factory=dict)
 
 
 @dataclass
@@ -45,6 +47,9 @@ class RouteInfo:
     route_component: Optional[str] = None
     parent_route: Optional[str] = None
     confidence: str = "medium"
+    route_comment: str = ""
+    display_name: str = ""
+    display_name_source: str = ""
 
 
 @dataclass
@@ -125,14 +130,21 @@ class AnalysisState:
     })
     codeImpact: Dict = field(default_factory=lambda: {
         "fileClassifications": [],
+        "candidatePageTraces": [],
         "pageImpacts": [],
         "unresolvedFiles": [],
         "sharedRisks": [],
+    })
+    candidateImpact: Dict = field(default_factory=lambda: {
+        "candidateModules": [],
+        "candidatePages": [],
+        "structuralHints": [],
     })
     businessImpact: Dict = field(default_factory=lambda: {
         "affectedModules": [],
         "affectedPages": [],
         "affectedFunctions": [],
+        "deprecated": True,
     })
     workflow: Dict = field(default_factory=lambda: {
         "manifest": {},
@@ -177,6 +189,12 @@ class StateStore:
 
     def set_file_classifications(self, changed_files):
         self.state.codeImpact["fileClassifications"] = [
-            {"file": x.path, "fileType": x.file_type, "moduleGuess": x.module_guess}
+            {
+                "file": x.path,
+                "fileType": x.file_type,
+                "moduleGuess": x.module_guess,
+                "noiseClassification": x.noise_classification,
+                "globalClassification": x.global_classification,
+            }
             for x in changed_files
         ]

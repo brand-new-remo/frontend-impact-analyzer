@@ -10,13 +10,16 @@
     "parsedDiff",
     "codeGraph",
     "codeImpact",
+    "candidateImpact",
     "businessImpact",
+    "workflow",
     "output",
     "processLogs"
   ],
   "properties": {
     "meta": {
       "type": "object",
+      "additionalProperties": true,
       "required": [
         "projectType",
         "analysisTime",
@@ -34,12 +37,201 @@
         },
         "outputContract": {"type": "string"},
         "stateSchema": {"type": "string"},
-          "resultSchema": {"type": "string"},
-          "statusSummary": {"type": "object"}
+        "resultSchema": {"type": "string"},
+        "statusSummary": {
+          "type": "object",
+          "additionalProperties": true,
+          "properties": {
+            "changedFileCount": {"type": "integer", "minimum": 0},
+            "candidatePageTraceCount": {"type": "integer", "minimum": 0},
+            "pageImpactCount": {"type": "integer", "minimum": 0},
+            "caseCount": {"type": "integer", "minimum": 0},
+            "unresolvedFileCount": {"type": "integer", "minimum": 0},
+            "diagnosticCount": {"type": "integer", "minimum": 0}
+          }
         }
-      },
-      "output": {
+      }
+    },
+    "input": {
+      "type": "object",
+      "additionalProperties": true,
+      "properties": {
+        "requirementText": {"type": "string"},
+        "gitDiffText": {"type": "string"}
+      }
+    },
+    "parsedDiff": {
+      "type": "object",
+      "additionalProperties": true,
+      "required": ["commitTypes", "changedFiles"],
+      "properties": {
+        "commitTypes": {
+          "type": "array",
+          "items": {"type": "string"}
+        },
+        "changedFiles": {
+          "type": "array",
+          "items": {"type": "object"}
+        }
+      }
+    },
+    "codeGraph": {
+      "type": "object",
+      "additionalProperties": true,
+      "properties": {
+        "imports": {"type": "object"},
+        "reverseImports": {"type": "object"},
+        "pages": {
+          "type": "array",
+          "items": {"type": "string"}
+        },
+        "routes": {
+          "type": "array",
+          "items": {"type": "object"}
+        },
+        "astFacts": {"type": "object"},
+        "aliases": {"type": "object"},
+        "barrelFiles": {
+          "type": "array",
+          "items": {"type": "string"}
+        },
+        "barrelEvidence": {"type": "object"},
+        "diagnostics": {
+          "type": "array",
+          "items": {"type": "object"}
+        }
+      }
+    },
+    "codeImpact": {
+      "type": "object",
+      "additionalProperties": true,
+      "required": ["candidatePageTraces", "pageImpacts", "unresolvedFiles", "sharedRisks"],
+      "properties": {
+        "fileClassifications": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": true,
+            "properties": {
+              "file": {"type": "string"},
+              "fileType": {"type": "string"},
+              "moduleGuess": {"type": "string"},
+              "noiseClassification": {
+                "type": "object",
+                "additionalProperties": true,
+                "properties": {
+                  "kind": {"type": "string"},
+                  "signals": {
+                    "type": "array",
+                    "items": {"type": "string"}
+                  },
+                  "confidence": {"type": "string"},
+                  "shouldAnalyze": {"type": "boolean"},
+                  "logicChangeScore": {"type": "number"},
+                  "reason": {"type": "string"}
+                }
+              },
+              "globalClassification": {
+                "type": "object",
+                "additionalProperties": true,
+                "properties": {
+                  "isGlobal": {"type": "boolean"},
+                  "kind": {"type": "string"},
+                  "signals": {
+                    "type": "array",
+                    "items": {"type": "string"}
+                  },
+                  "confidence": {"type": "string"},
+                  "blastRadiusPolicy": {"type": "string"},
+                  "reason": {"type": "string"},
+                  "recommendedAnalysis": {"type": "string"}
+                }
+              }
+            }
+          }
+        },
+        "candidatePageTraces": {
+          "type": "array",
+          "items": {"type": "object"}
+        },
+        "pageImpacts": {
+          "description": "Deprecated compatibility alias for candidatePageTraces.",
+          "type": "array",
+          "items": {"type": "object"}
+        },
+        "unresolvedFiles": {
+          "type": "array",
+          "items": {"type": "object"}
+        },
+        "sharedRisks": {
+          "type": "array",
+          "items": {"type": "object"}
+        }
+      }
+    },
+    "candidateImpact": {
+      "type": "object",
+      "additionalProperties": true,
+      "required": ["candidateModules", "candidatePages", "structuralHints"],
+      "properties": {
+        "candidateModules": {
+          "type": "array",
+          "items": {"type": "string"}
+        },
+        "candidatePages": {
+          "type": "array",
+          "items": {"type": "string"}
+        },
+        "structuralHints": {
+          "type": "array",
+          "items": {"type": "string"}
+        }
+      }
+    },
+    "businessImpact": {
+      "description": "Deprecated compatibility section. Use candidateImpact instead.",
+      "type": "object",
+      "additionalProperties": true,
+      "properties": {
+        "affectedModules": {
+          "type": "array",
+          "items": {"type": "string"}
+        },
+        "affectedPages": {
+          "type": "array",
+          "items": {"type": "string"}
+        },
+        "affectedFunctions": {
+          "type": "array",
+          "items": {"type": "string"}
+        },
+        "deprecated": {"type": "boolean"}
+      }
+    },
+    "workflow": {
+      "type": "object",
+      "additionalProperties": true,
+      "properties": {
+        "manifest": {"type": "object"},
+        "preflight": {"type": "object"},
+        "documentIndex": {"type": "object"},
+        "diffIndex": {"type": "object"},
+        "fileImpactSeeds": {"type": "object"},
+        "changeClusters": {"type": "object"},
+        "clusterAnalysisTasks": {"type": "string"},
+        "clusterContexts": {
+          "type": "array",
+          "items": {"type": "object"}
+        },
+        "coverage": {"type": "object"}
+      }
+    },
+    "output": {
       "$ref": "analysis-result.schema.json"
+    },
+    "processLogs": {
+      "type": "array",
+      "items": {"type": "object"}
     }
   }
 }

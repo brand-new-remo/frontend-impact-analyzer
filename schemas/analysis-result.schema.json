@@ -10,12 +10,12 @@
     "coverage",
     "clusters",
     "cases",
-    "fallbackCases",
-    "nextStepsForClaude"
+    "fallbackCases"
   ],
   "properties": {
     "meta": {
       "type": "object",
+      "additionalProperties": true,
       "required": ["outputContract", "analysisStatus"],
       "properties": {
         "outputContract": {"type": "string"},
@@ -23,21 +23,152 @@
         "analysisStatus": {
           "type": "string",
           "enum": ["running", "success", "partial_success", "failed", "needs_cluster_analysis"]
+        },
+        "resultSource": {"type": "string"}
+      }
+    },
+    "summary": {
+      "type": "object",
+      "additionalProperties": true,
+      "properties": {
+        "candidateModules": {
+          "type": "array",
+          "items": {"type": "string"}
+        },
+        "candidatePages": {
+          "type": "array",
+          "items": {"type": "string"}
+        },
+        "candidateRoutes": {
+          "type": "array",
+          "items": {"type": "string"}
+        },
+        "structuralHints": {
+          "type": "array",
+          "items": {"type": "string"}
+        },
+        "clusterCount": {"type": "integer", "minimum": 0},
+        "analyzedClusterCount": {"type": "integer", "minimum": 0},
+        "missingAnalysisClusterCount": {"type": "integer", "minimum": 0},
+        "caseCount": {"type": "integer", "minimum": 0},
+        "fallbackCaseCount": {"type": "integer", "minimum": 0},
+        "documentCount": {"type": "integer", "minimum": 0},
+        "statusSummary": {"type": "object"}
+      }
+    },
+    "coverage": {
+      "type": "object",
+      "additionalProperties": true,
+      "properties": {
+        "totalChangedFiles": {"type": "integer", "minimum": 0},
+        "deepAnalysisClusterCount": {"type": "integer", "minimum": 0},
+        "shallowAnalysisClusterCount": {"type": "integer", "minimum": 0},
+        "ignoredOrShallowFileCount": {"type": "integer", "minimum": 0},
+        "noiseFileCount": {"type": "integer", "minimum": 0},
+        "filesByBucket": {"type": "object"},
+        "filesByNoiseKind": {"type": "object"},
+        "diagnosticCount": {"type": "integer", "minimum": 0},
+        "warnings": {
+          "type": "array",
+          "items": {"type": "object"}
         }
       }
     },
-    "summary": {"type": "object"},
-    "coverage": {"type": "object"},
     "clusters": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": true,
+        "required": ["clusterId"],
+        "properties": {
+          "clusterId": {"type": "string"},
+          "scope": {"type": "string"},
+          "title": {"type": "string"},
+          "changedFiles": {
+            "type": "array",
+            "items": {"type": "string"}
+          },
+          "candidatePages": {
+            "type": "array",
+            "items": {"type": "string"}
+          },
+          "candidateRoutes": {
+            "type": "array",
+            "items": {"type": "string"}
+          },
+          "semanticTags": {
+            "type": "array",
+            "items": {"type": "string"}
+          },
+          "confidence": {"type": "string"},
+          "globalClassification": {"type": "object"},
+          "needsDeepAnalysis": {"type": "boolean"},
+          "contextFile": {"type": "string"},
+          "analysisOutputFile": {"type": "string"},
+          "status": {"type": "string"},
+          "caseCount": {"type": "integer", "minimum": 0}
+        }
+      }
+    },
+    "clusterAnalyses": {
+      "type": "array",
+      "items": {"type": "object"}
+    },
+    "validationReports": {
+      "type": "array",
+      "items": {"type": "object"}
+    },
+    "orphanClusterAnalyses": {
       "type": "array",
       "items": {"type": "object"}
     },
     "cases": {
       "type": "array",
-      "items": {"type": "object"}
+      "items": {
+        "type": "object",
+        "additionalProperties": true,
+        "required": ["clusterId", "caseSource", "caseName", "testSteps", "expectedResults"],
+        "properties": {
+          "clusterId": {"type": "string"},
+          "caseSource": {"type": "string", "const": "cluster-analysis"},
+          "moduleName": {"type": "string"},
+          "pageName": {"type": "string"},
+          "routePath": {"type": "string"},
+          "caseName": {"type": "string"},
+          "businessGoal": {"type": "string"},
+          "entry": {"type": "object"},
+          "preconditions": {
+            "type": "array",
+            "items": {"type": "string"}
+          },
+          "testSteps": {
+            "type": "array",
+            "items": {"type": "string"}
+          },
+          "expectedResults": {
+            "type": "array",
+            "items": {"type": "string"}
+          },
+          "priority": {"type": "string"},
+          "confidence": {"type": "string"},
+          "changeIntent": {"type": "string"},
+          "userVisibleChange": {"type": "string"},
+          "affectedFunctionUnit": {"type": "string"},
+          "impactReason": {"type": "string"},
+          "evidence": {
+            "type": "array",
+            "items": {"type": "object"}
+          },
+          "uncertainties": {
+            "type": "array",
+            "items": {"type": "string"}
+          }
+        }
+      }
     },
     "fallbackCases": {
       "type": "array",
+      "maxItems": 0,
       "items": {"type": "object"}
     },
     "nextStepsForClaude": {

@@ -17,14 +17,30 @@ The skill is designed for large PRs and release diffs. It should not ask the use
 4. Ask whether to use configured diff ignores and whether to add extra ignored folders.
 5. Generate a named diff file when `--make-diff` is used.
 6. Parse and index the diff.
-7. Scan source code, build import/reverse-import graph, bind pages and routes.
-8. Build file impact seeds.
-9. Group changed files into change clusters.
-10. Build `cluster-context/*.json` evidence packs.
-11. Let Claude Code analyze clusters one by one, using document candidates and original docs when needed.
-12. Merge the cluster conclusions into final QA cases and summary.
+7. Classify non-logic noise such as format-only, comment-only, import-only, generated, lockfile, test-only, and style-only changes.
+8. Scan source code, build import/reverse-import graph, bind pages and routes.
+9. Build file impact seeds.
+10. Group logic-like changed files into change clusters. Global/cross-cutting changes become separate global clusters instead of expanding to all pages.
+11. Build `cluster-context/*.json` evidence packs.
+12. Claude Code should analyze clusters one by one, using document candidates and original docs when needed.
+13. Claude Code should write `cluster-analysis/*.analysis.json` for analyzed clusters.
+14. Merge and validate the cluster conclusions into final QA cases and summary.
 
 ## Configuration
+
+Command path rule:
+
+- Let `<skill_root>` be the absolute path to this skill directory, the directory containing this `SKILL.md`.
+- Claude Code is usually running inside the target business project, so do not run `scripts/front_end_impact_analyzer.py` as a project-relative path.
+- Always run the bundled analyzer with `uv run --project "<skill_root>" python "<skill_root>/scripts/front_end_impact_analyzer.py"`.
+- On Windows PowerShell, use the same one-line commands below and quote paths. Do not use Bash `\` line continuations; PowerShell uses backticks for line continuation, but one-line commands are preferred.
+- Before the first run in a new environment, run `--doctor`. If `uv` is missing, stop and tell the user to install uv before continuing; do not guess a different command unless the user explicitly asks for a non-uv fallback.
+
+Environment check:
+
+```text
+uv run --project "<skill_root>" python "<skill_root>/scripts/front_end_impact_analyzer.py" --project-root "<target_project_root>" --doctor
+```
 
 Default config path:
 
@@ -34,10 +50,8 @@ impact-analyzer.config.json
 
 Create it when missing:
 
-```bash
-uv run python scripts/front_end_impact_analyzer.py \
-  --project-root <target_project_root> \
-  --init-config
+```text
+uv run --project "<skill_root>" python "<skill_root>/scripts/front_end_impact_analyzer.py" --project-root "<target_project_root>" --init-config
 ```
 
 Important config sections:
@@ -50,6 +64,7 @@ Important config sections:
 - `paths.outputDir`: run artifact output directory.
 - `diff.ignoreDirs`, `diff.ignoreFiles`, `diff.ignoreGlobs`: paths excluded from generated git diff.
 - `analysis.requireRepoWiki`, `analysis.requireRequirements`, `analysis.requireSpecs`: whether missing context should block or warn.
+- `analysis.maxClusterContextChars`: per-cluster evidence pack size budget.
 
 If required repo wiki is missing, tell the user to generate it with the repo-wiki skill before continuing.
 
@@ -57,32 +72,30 @@ If required repo wiki is missing, tell the user to generate it with the repo-wik
 
 Generate a diff from branches and analyze it:
 
-```bash
-uv run python scripts/front_end_impact_analyzer.py \
-  --project-root <target_project_root> \
-  --make-diff \
-  --base-branch <base_branch> \
-  --compare-branch <compare_branch>
+```text
+uv run --project "<skill_root>" python "<skill_root>/scripts/front_end_impact_analyzer.py" --project-root "<target_project_root>" --make-diff --base-branch "<base_branch>" --compare-branch "<compare_branch>"
 ```
 
 Analyze an existing diff:
 
-```bash
-uv run python scripts/front_end_impact_analyzer.py \
-  --project-root <target_project_root> \
-  --diff-file <diff_file>
+```text
+uv run --project "<skill_root>" python "<skill_root>/scripts/front_end_impact_analyzer.py" --project-root "<target_project_root>" --diff-file "<diff_file>"
 ```
 
 Optional arguments:
 
-```bash
+```text
 --config-file <config_json>
 --project-profile-file <project_profile_md>
 --ignore-dir <extra_dir_to_ignore>
 --analysis-output-dir <run_output_dir>
+--install-claude-agents
+--overwrite-claude-agents
 --state-output <state_json>
 --result-output <result_json>
 ```
+
+`--state-output` and `--result-output` are optional extra export copies. By default, state and result files stay inside the current run artifact directory.
 
 Generated diff names follow:
 
@@ -110,14 +123,15 @@ Each run writes an artifact directory under the configured output directory:
 │   └── cluster-002.json
 ├── cluster-analysis/
 ├── 90-coverage-report.json
+├── 98-analysis-state.json
 ├── 99-final-result.json
 └── 99-merged-result.json
 ```
 
-Primary result file:
+Primary initial result file:
 
 ```text
-impact-analysis-result.json
+<runDir>/99-final-result.json
 ```
 
 The first result is an analysis package, not a bare case array:
@@ -140,18 +154,32 @@ schemas/analysis-result.schema.json
 
 Do not produce generic fallback cases. For large or important diffs, use the clusters.
 
+When the user asks for final cases, Claude Code should not stop after producing the analysis package. It should continue through the deep-analysis queue when feasible:
+
+```text
+read 06-cluster-analysis-tasks.md
+-> read one cluster-context file
+-> inspect source/docs when evidence snippets are insufficient
+-> write cluster-analysis/<clusterId>.analysis.json
+-> repeat for prioritized clusters
+-> run merge
+-> report merged cases and validation status
+```
+
 For each cluster with `needsDeepAnalysis=true`:
 
 1. Read `06-cluster-analysis-tasks.md`.
 2. Pick the next deep-analysis cluster.
 3. Read `cluster-context/<clusterId>.json`.
 4. Inspect `diffEvidence`, `codeEvidence`, and `documentCandidates`.
-5. If document snippets are ambiguous or insufficient, open the original repo-wiki/requirement/spec files around the matched sections.
-6. Use the `change-intent-judge` agent when available to determine the precise user-visible change.
-7. Use the `evidence-checker` agent when available to verify claims and confidence.
-8. Use the `case-writer` agent when available to write cluster-specific QA cases.
-9. Keep evidence and uncertainty explicit.
-10. Avoid broadening scope beyond the evidence.
+5. Inspect `traceEvidence`, `routeEvidence`, `flowHints`, and `riskHints` before making impact claims.
+6. Inspect `commentEvidence` as candidate business evidence, not final proof.
+7. If document snippets are ambiguous or insufficient, open the original repo-wiki/requirement/spec files around the matched headings or sections.
+8. Use the `change-intent-judge` agent when available to determine the precise user-visible change.
+9. Use the `evidence-checker` agent when available to verify claims and confidence.
+10. Use the `case-writer` agent when available to write cluster-specific QA cases.
+11. Keep evidence and uncertainty explicit.
+12. Avoid broadening scope beyond the evidence.
 
 Recommended cluster-analysis output shape:
 
@@ -171,18 +199,29 @@ Recommended cluster-analysis output shape:
   "docEvidenceUsed": [],
   "confidence": "high",
   "uncertainties": [],
-  "cases": []
+  "cases": [
+    {
+      "moduleName": "orders",
+      "pageName": "订单列表",
+      "routePath": "/orders",
+      "caseName": "批量编辑弹窗提交时传递更新后的字段值",
+      "businessGoal": "验证批量编辑提交链路按本次变更传递字段并刷新列表",
+      "entry": {"route": "/orders", "page": "订单列表"},
+      "preconditions": ["存在可批量编辑的订单数据"],
+      "testSteps": ["进入订单列表", "选择多条订单", "打开批量编辑弹窗", "修改字段并提交"],
+      "expectedResults": ["提交请求包含修改后的字段值", "提交成功后弹窗关闭并刷新列表"],
+      "priority": "high",
+      "confidence": "high",
+      "evidence": []
+    }
+  ]
 }
 ```
 
 After writing one or more cluster analysis files, merge them:
 
-```bash
-uv run python scripts/front_end_impact_analyzer.py \
-  --project-root <target_project_root> \
-  --merge-cluster-analysis \
-  --run-dir <run_artifact_dir> \
-  --result-output impact-analysis-merged-result.json
+```text
+uv run --project "<skill_root>" python "<skill_root>/scripts/front_end_impact_analyzer.py" --project-root "<target_project_root>" --merge-cluster-analysis --run-dir "<run_artifact_dir>"
 ```
 
 Merged result behavior:
@@ -190,7 +229,12 @@ Merged result behavior:
 - `cases`: normalized cases from Claude-written `cluster-analysis/*.analysis.json`
 - `fallbackCases`: reserved compatibility field; clusters without Claude analysis produce no cases
 - `clusters`: analyzed/missing-analysis status per cluster
+- `validationReports`: quality checks for missing evidence, generic wording, and unclear user actions
 - `meta.analysisStatus`: `success`, `partial_success`, or `needs_cluster_analysis`
+
+After merge, optionally use the `case-refiner` agent to write `<runDir>/99-refined-cases.json`.
+
+Refinement is semantic cleanup based on existing code and document evidence. It must preserve each case's intent, user operation flow, expected behavior, scope, evidence, priority, and confidence. It may improve wording, dedupe, reorder, split overlong cases, or remove unsupported/generic cases. It must not add new pages, routes, expectations, business scope, or cases without existing evidence.
 
 ## Decision Rules
 
@@ -200,7 +244,11 @@ Merged result behavior:
 - Use `06-cluster-analysis-tasks.md` as the work queue.
 - Use `cluster-context/*.json` for local reasoning.
 - Initial `cases` is intentionally empty. Python does not generate template fallback cases.
+- High-confidence non-logic noise stays visible in `03-diff-index.json` and `coverage.filesByNoiseKind`, but is not traced or clustered.
+- Global or cross-cutting changes should be analyzed as their own cluster with representative flows; do not generate cases for every page.
 - Merged `cases` should come from cluster-level Claude reasoning.
+- Refined cases must keep the merged case intent and operation flow unchanged; refinement is not a second round of case generation.
+- Merge validates cluster-analysis quality and reports generic or unsupported cases.
 - Do not invent pages or routes that are not supported by trace evidence.
 - Do not invent requirements that are not supported by requirement/spec/wiki evidence.
 - If evidence is weak, keep confidence low and write an uncertainty.
@@ -213,25 +261,47 @@ Merged result behavior:
 - multi-target aliases
 - barrel exports and multi-hop re-export traversal
 - nested routes and lazy routes
+- route comments and route meta/title display-name extraction
+- business-code comment evidence collection near changed hunks, changed symbols, and business keywords
 - symbol-level first-hop filtering
 - format-only diff skipping
 - API field-level diff heuristics
 - diff indexing
+- non-logic diff noise classification
+- global/cross-cutting change classification without all-page expansion
 - file impact seeds
 - page/module-based change clustering
 - per-cluster code/document evidence packs
+- explicit trace evidence, route evidence, risk hints, and context budget metadata
+- flow hints for entry route, user action, and state-change reasoning
+- cluster-analysis validation reports during merge
 - cluster analysis task markdown generation
 - coverage reporting
 
 ## Claude Code Agents
 
-This skill includes optional project-level Claude Code agents:
+This skill includes optional Claude Code subagent templates:
 
-- `.claude/agents/change-intent-judge.md`
-- `.claude/agents/evidence-checker.md`
-- `.claude/agents/case-writer.md`
+- `agents/claude/change-intent-judge.md`
+- `agents/claude/evidence-checker.md`
+- `agents/claude/case-writer.md`
+- `agents/claude/case-refiner.md`
 
-Use them per cluster, not for the whole diff. The main Claude Code thread should keep orchestration ownership: choose clusters, call or follow agent instructions, write `cluster-analysis/*.analysis.json`, then run merge.
+These are templates bundled with the skill. They are not loaded from the skill directory when Claude Code is running inside the target business project. To enable them, ask the user for confirmation, then install them into the target project's `.claude/agents/` directory:
+
+```text
+uv run --project "<skill_root>" python "<skill_root>/scripts/front_end_impact_analyzer.py" --project-root "<target_project_root>" --install-claude-agents
+```
+
+After installing agent files manually or through this command, restart the Claude Code session or use `/agents` so Claude Code loads the new project subagents before the cluster-analysis step.
+
+If the target project already has same-named agents, the installer skips them by default. Only overwrite after explicit user confirmation:
+
+```text
+uv run --project "<skill_root>" python "<skill_root>/scripts/front_end_impact_analyzer.py" --project-root "<target_project_root>" --install-claude-agents --overwrite-claude-agents
+```
+
+Use the installed agents per cluster, not for the whole diff. The main Claude Code thread should keep orchestration ownership: choose clusters, call or follow agent instructions, write `cluster-analysis/*.analysis.json`, run merge, then use `case-refiner` only for final evidence-preserving wording and dedupe.
 
 ## Known Limits
 
@@ -259,3 +329,6 @@ After running this skill:
 - Impact and confidence rules: `references/impact-rules.md`
 - Route tracing notes: `references/route-conventions.md`
 - Agent usage notes: `references/agent-usage.md`
+- Real project validation workflow: `references/real-run-workflow.md`
+- Internal refactor plan: `internal/REFACTOR_PLAN.md`
+- Real run review template: `internal/REAL_RUN_REVIEW.md`
