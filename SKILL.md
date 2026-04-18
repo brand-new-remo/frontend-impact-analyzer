@@ -1,115 +1,71 @@
 ---
 name: frontend-impact-analyzer
-description: analyze requirement text, git diff, and a local React/React Router/Vite codebase to generate an evidence-based JSON case array for QA. use when an agent needs to trace changed front-end files to concrete pages and routes, account for tsconfig aliases, barrel exports, nested routes, lazy routes, symbol-level usage, and api-field-level changes, then output sorted test-case items instead of prose.
+description: run a full front-end change-impact workflow for React/React Router/Vite projects, including preflight checks, branch diff generation, large-diff indexing, page/route tracing, change clustering, per-cluster evidence packs, document retrieval from repo-wiki/requirements/specs, and an evidence-backed QA analysis package.
 ---
 
 # Frontend Impact Analyzer
 
-Generate a JSON case array from front-end code changes.
+Use this skill to turn a front-end branch diff into evidence-backed QA impact analysis.
 
-This skill is for agents such as Codex or Claude Code that need to:
-- inspect a React + React Router + Vite project
-- analyze requirement text and git diff together
-- trace change impact to concrete pages and routes
-- convert technical impact into testable QA cases
+The skill is designed for large PRs and release diffs. It should not ask the user to manually prepare every input first. It should check context, generate a diff when needed, create intermediate evidence files, and guide Claude Code through per-cluster analysis instead of treating the whole diff as one blob.
 
-This skill does:
-- static analysis
-- evidence-based page / route tracing
-- conservative impact inference
-- JSON case generation
+## Core Workflow
 
-This skill does not:
-- execute test cases
-- validate runtime behavior in a browser
-- invent cases that are not supported by trace or route evidence
-- treat pure formatting diffs as real impact
+1. Load or create `impact-analyzer.config.json`.
+2. Run preflight checks for repo wiki, requirements, specs, git state, and output paths.
+3. Ask the user for base branch and compare branch if they were not provided.
+4. Ask whether to use configured diff ignores and whether to add extra ignored folders.
+5. Generate a named diff file when `--make-diff` is used.
+6. Parse and index the diff.
+7. Scan source code, build import/reverse-import graph, bind pages and routes.
+8. Build file impact seeds.
+9. Group changed files into change clusters.
+10. Build `cluster-context/*.json` evidence packs.
+11. Let Claude Code analyze clusters one by one, using document candidates and original docs when needed.
+12. Merge the cluster conclusions into final QA cases and summary.
 
-## When To Use
+## Configuration
 
-Use this skill when:
-- the user provides requirement text, a PR diff, or a git diff
-- the project is a React / React Router / Vite style front-end
-- the goal is to produce QA-oriented test cases
-
-Do not use this skill when:
-- the user only wants prose explanation of a diff
-- the target project is not a front-end app of this shape
-- there is no local source tree to inspect
-
-## Inputs
-
-Expected inputs:
-- `project_root`: local project root to scan
-- `diff_file`: a file containing git diff / PR diff text
-- `requirement_file`: optional requirement / design note text
-- optional project profile document such as `project.md`: supplemental context only, not a source of hard-coded project-specific rules
-
-Recommended preparation:
-1. Save requirement text to a file if it exists.
-2. Save diff content to a file.
-3. Point `--project-root` at the real source tree being analyzed, not at this skill repo.
-
-## Recommended Pre-Run Decision
-
-Before running the analyzer, the calling agent should decide whether to generate a project profile file first.
-
-Recommended agent prompt to the user:
+Default config path:
 
 ```text
-为了提升 alias、route、barrel、page 识别精度，是否要先生成一份项目画像文件？
-
-- 选择“是”：会多一个前置步骤，但通常更适合目录结构复杂、monorepo、多端、非标准路由项目
-- 选择“否”：直接开始分析，速度更快，但结果会更依赖源码静态分析本身
+impact-analyzer.config.json
 ```
 
-Decision rule:
-- If the project is large, non-standard, monorepo-based, multi-app, or likely to have custom conventions, recommend generating the project profile first.
-- If the project is small, conventional, or the user prefers speed, run the analyzer directly.
-- If a project profile file already exists, reuse it instead of asking again unless the user wants to refresh it.
-
-If the user chooses to generate one, treat the profile as:
-- supplemental context
-- a source of reusable patterns
-- a hint layer, not a replacement for AST and trace evidence
-
-Recommended file name:
-- `impact-analyzer-project-profile.md`
-
-Recommended minimum sections:
-- `项目概览`
-- `目录结构画像`
-- `页面约定`
-- `路由约定`
-- `tsconfig / alias / import 约定`
-- `barrel export 约定`
-- `API 层约定`
-- `shared component / business component / hooks / store 约定`
-- `最重要的静态分析规则`
-- `最容易误判的场景`
-- `真实文件参考清单`
-
-Profile authoring rules:
-- Prefer real paths and real examples over abstract summaries.
-- Mark unknowns explicitly instead of guessing.
-- Separate reusable patterns from project-specific quirks.
-- Do not rewrite the whole project architecture if only front-end-impact-relevant parts matter.
-- Do not turn the profile into executable conclusions; it is supporting context only.
-
-## Invocation
-
-Preferred command:
+Create it when missing:
 
 ```bash
 uv run python scripts/front_end_impact_analyzer.py \
   --project-root <target_project_root> \
-  --diff-file <diff_file> \
-  --requirement-file <requirement_file> \
-  --state-output impact-analysis-state.json \
-  --result-output impact-analysis-result.json
+  --init-config
 ```
 
-Minimal command:
+Important config sections:
+
+- `paths.repoWikiDir`: repo-wiki output directory.
+- `paths.projectProfileFile`: project analysis / project profile document.
+- `paths.requirementsDir`: requirement documents directory.
+- `paths.specsDir`: developer spec documents directory.
+- `paths.diffDir`: generated diff output directory.
+- `paths.outputDir`: run artifact output directory.
+- `diff.ignoreDirs`, `diff.ignoreFiles`, `diff.ignoreGlobs`: paths excluded from generated git diff.
+- `analysis.requireRepoWiki`, `analysis.requireRequirements`, `analysis.requireSpecs`: whether missing context should block or warn.
+
+If required repo wiki is missing, tell the user to generate it with the repo-wiki skill before continuing.
+
+## Invocation
+
+Generate a diff from branches and analyze it:
+
+```bash
+uv run python scripts/front_end_impact_analyzer.py \
+  --project-root <target_project_root> \
+  --make-diff \
+  --base-branch <base_branch> \
+  --compare-branch <compare_branch>
+```
+
+Analyze an existing diff:
 
 ```bash
 uv run python scripts/front_end_impact_analyzer.py \
@@ -117,76 +73,142 @@ uv run python scripts/front_end_impact_analyzer.py \
   --diff-file <diff_file>
 ```
 
-## Agent Workflow
+Optional arguments:
 
-1. Check whether a project profile file already exists.
-2. If it does not exist, ask the user whether to generate one first.
-3. Prepare diff and optional requirement files.
-4. Run the analyzer.
-5. Read `impact-analysis-state.json`.
-6. Read `impact-analysis-result.json`.
-7. Check `meta.analysisStatus`.
-8. If status is `success` or `partial_success`, use the JSON case array as the primary result.
-9. If status is `failed`, stop and surface the fatal diagnostic from state.
+```bash
+--config-file <config_json>
+--project-profile-file <project_profile_md>
+--ignore-dir <extra_dir_to_ignore>
+--analysis-output-dir <run_output_dir>
+--state-output <state_json>
+--result-output <result_json>
+```
 
-## Result Contract
+Generated diff names follow:
 
-The final result file is a JSON array only.
+```text
+diff_<base>_to_<compare>_<YYYYMMDD_HHMMSS>.patch
+```
 
-Each item contains:
-- `页面名`
-- `用例名称`
-- `测试步骤`
-- `预期结果`
-- `用例等级`
-- `用例可置信度`
-- `来源描述`
+Branch names are sanitized for filenames, while the run manifest keeps the real branch names.
 
-The array is already sorted for downstream consumption.
+## Run Artifacts
 
-Schemas:
-- Result schema: `schemas/case-array.schema.json`
-- State schema: `schemas/analysis-state.schema.json`
+Each run writes an artifact directory under the configured output directory:
 
-## State Contract
+```text
+<outputDir>/<runId>/
+├── 00-run-manifest.json
+├── 01-preflight-report.json
+├── 02-document-index.json
+├── 03-diff-index.json
+├── 04-file-impact-seeds.json
+├── 05-change-clusters.json
+├── 06-cluster-analysis-tasks.md
+├── cluster-context/
+│   ├── cluster-001.json
+│   └── cluster-002.json
+├── cluster-analysis/
+├── 90-coverage-report.json
+├── 99-final-result.json
+└── 99-merged-result.json
+```
 
-Read `impact-analysis-state.json` for:
-- process logs
-- parsed diff info
-- import / reverse-import graph
-- route binding evidence
-- barrel evidence
-- diagnostics
-- unresolved files
-- page impacts
+Primary result file:
 
-Important fields:
-- `meta.analysisStatus`
-- `meta.statusSummary`
-- `codeGraph.diagnostics`
-- `codeImpact.unresolvedFiles`
-- `codeImpact.pageImpacts`
-- `codeImpact.sharedRisks`
+```text
+impact-analysis-result.json
+```
 
-Status meanings:
-- `success`: analyzer completed and no unresolved files or diagnostics remain
-- `partial_success`: analyzer completed but unresolved files or diagnostics exist
-- `failed`: analyzer could not complete; state contains a fatal diagnostic
+The first result is an analysis package, not a bare case array:
 
-## Boundaries And Decision Rules
+- `meta`
+- `summary`
+- `coverage`
+- `clusters`
+- `cases`: empty before merge; populated only by merged Claude cluster analyses
+- `fallbackCases`: reserved compatibility field; should normally remain empty
+- `nextStepsForClaude`
 
-The agent using this skill should follow these rules:
-- Prefer the generated JSON case array over freehand prose.
-- Do not add pages or routes that are not supported by state evidence.
-- If `partial_success`, keep the generated cases but explicitly surface unresolved files and diagnostics.
-- If `failed`, do not invent fallback cases.
-- If confidence is low, keep it low.
-- If the diff is formatting-only, the analyzer may legitimately produce no cases.
-- If a project profile document exists, use it to understand conventions, but extract reusable patterns rather than turning the skill into a project-specific adapter.
+Schema:
 
-## What The Analyzer Understands
+```text
+schemas/analysis-result.schema.json
+```
 
-Current supported capabilities include:
+## Claude Code Cluster Analysis
+
+Do not produce generic fallback cases. For large or important diffs, use the clusters.
+
+For each cluster with `needsDeepAnalysis=true`:
+
+1. Read `06-cluster-analysis-tasks.md`.
+2. Pick the next deep-analysis cluster.
+3. Read `cluster-context/<clusterId>.json`.
+4. Inspect `diffEvidence`, `codeEvidence`, and `documentCandidates`.
+5. If document snippets are ambiguous or insufficient, open the original repo-wiki/requirement/spec files around the matched sections.
+6. Use the `change-intent-judge` agent when available to determine the precise user-visible change.
+7. Use the `evidence-checker` agent when available to verify claims and confidence.
+8. Use the `case-writer` agent when available to write cluster-specific QA cases.
+9. Keep evidence and uncertainty explicit.
+10. Avoid broadening scope beyond the evidence.
+
+Recommended cluster-analysis output shape:
+
+```json
+{
+  "clusterId": "cluster-001",
+  "changeIntent": "modal-submit-flow",
+  "userVisibleChange": "订单列表批量编辑弹窗的提交链路发生变化",
+  "affectedFunctionUnits": [
+    "批量编辑入口",
+    "弹窗打开关闭",
+    "表单字段校验",
+    "提交请求参数",
+    "提交后列表刷新"
+  ],
+  "codeEvidenceUsed": [],
+  "docEvidenceUsed": [],
+  "confidence": "high",
+  "uncertainties": [],
+  "cases": []
+}
+```
+
+After writing one or more cluster analysis files, merge them:
+
+```bash
+uv run python scripts/front_end_impact_analyzer.py \
+  --project-root <target_project_root> \
+  --merge-cluster-analysis \
+  --run-dir <run_artifact_dir> \
+  --result-output impact-analysis-merged-result.json
+```
+
+Merged result behavior:
+
+- `cases`: normalized cases from Claude-written `cluster-analysis/*.analysis.json`
+- `fallbackCases`: reserved compatibility field; clusters without Claude analysis produce no cases
+- `clusters`: analyzed/missing-analysis status per cluster
+- `meta.analysisStatus`: `success`, `partial_success`, or `needs_cluster_analysis`
+
+## Decision Rules
+
+- Do not analyze a 50k-line diff as one prompt-sized object.
+- Use `03-diff-index.json` for global overview.
+- Use `05-change-clusters.json` for prioritization.
+- Use `06-cluster-analysis-tasks.md` as the work queue.
+- Use `cluster-context/*.json` for local reasoning.
+- Initial `cases` is intentionally empty. Python does not generate template fallback cases.
+- Merged `cases` should come from cluster-level Claude reasoning.
+- Do not invent pages or routes that are not supported by trace evidence.
+- Do not invent requirements that are not supported by requirement/spec/wiki evidence.
+- If evidence is weak, keep confidence low and write an uncertainty.
+- If a shared component changes, do not expand to the whole system unless traces support the affected pages.
+- Formatting-only changes may produce no cases.
+
+## Current Analyzer Capabilities
+
 - tsconfig alias resolution, including `extends`
 - multi-target aliases
 - barrel exports and multi-hop re-export traversal
@@ -194,51 +216,42 @@ Current supported capabilities include:
 - symbol-level first-hop filtering
 - format-only diff skipping
 - API field-level diff heuristics
-- business-oriented case grouping
+- diff indexing
+- file impact seeds
+- page/module-based change clustering
+- per-cluster code/document evidence packs
+- cluster analysis task markdown generation
+- coverage reporting
 
-Current known limits:
-- symbol-level tracing is strongest on the first hop and may still widen later in the graph
-- wildcard alias edge cases are not fully covered
-- API diff understanding is heuristic, not full schema diffing
-- some dynamic route factories or generated routes may remain unresolved
+## Claude Code Agents
 
-## Recommended Agent Response Behavior
+This skill includes optional project-level Claude Code agents:
+
+- `.claude/agents/change-intent-judge.md`
+- `.claude/agents/evidence-checker.md`
+- `.claude/agents/case-writer.md`
+
+Use them per cluster, not for the whole diff. The main Claude Code thread should keep orchestration ownership: choose clusters, call or follow agent instructions, write `cluster-analysis/*.analysis.json`, then run merge.
+
+## Known Limits
+
+- Cluster intent is not fully inferred by Python; Claude Code should perform cluster-level semantic judgment.
+- Document retrieval is keyword-based candidate recall, not final semantic proof.
+- API field analysis is heuristic, not a full contract diff.
+- Symbol tracing is strongest at the first hop.
+- Dynamic route factories and generated route systems may remain unresolved.
+
+## Response Behavior
 
 After running this skill:
-- return the JSON case array when the user wants machine-readable output
-- mention unresolved files or diagnostics when present
-- avoid rewriting the cases into vague prose unless the user explicitly asks
-- if a summary is needed, keep it short and anchor it to state evidence
 
-## Prompt Template
-
-Use this when another agent needs a ready-made instruction:
-
-```text
-Run the frontend-impact-analyzer skill against the target front-end project.
-
-Inputs:
-- project root: <target_project_root>
-- diff file: <diff_file>
-- requirement file: <requirement_file_or_none>
-- project profile file: <project_profile_file_or_none>
-
-Instructions:
-1. If a project profile file does not already exist, ask the user whether to generate one first to improve analysis precision.
-2. If the user agrees, generate the project profile file before running the analyzer.
-3. Execute the analyzer with uv run.
-4. Read both impact-analysis-state.json and impact-analysis-result.json.
-5. Treat impact-analysis-result.json as the primary deliverable.
-6. Do not invent pages, routes, or cases beyond what the state evidence supports.
-7. If meta.analysisStatus is partial_success, keep the case array but also report unresolved files and diagnostics.
-8. If meta.analysisStatus is failed, return the fatal diagnostic instead of inventing output.
-9. Do not execute tests or browser flows; only generate the case array.
-```
-
-Recommended profile file conventions:
-- File name: `impact-analyzer-project-profile.md`
-- Focus on reusable front-end conventions, not one-off implementation details
-- Include real route files, page files, API files, alias rules, and barrel patterns when possible
+- Report the run artifact directory.
+- Report `meta.analysisStatus`.
+- Summarize coverage: changed files, cluster count, deep-analysis clusters, diagnostics.
+- For large diffs, tell the user which clusters should be analyzed first.
+- Surface missing repo wiki/spec/requirements from `01-preflight-report.json`.
+- Before merge, `cases` should be empty.
+- After merge, use merged `cases`; clusters without Claude analysis must remain case-less and visible as `missing-analysis`.
 
 ## Resources
 

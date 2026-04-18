@@ -1,0 +1,217 @@
+{
+  "meta": {
+    "outputContract": "cluster-analysis-result-v1",
+    "runId": "run-snapshot",
+    "analysisStatus": "success",
+    "resultSource": "cluster-analysis-merge"
+  },
+  "summary": {
+    "clusterCount": 1,
+    "analyzedClusterCount": 1,
+    "missingAnalysisClusterCount": 0,
+    "caseCount": 2,
+    "fallbackCaseCount": 0,
+    "affectedPages": [
+      "src/pages/users/UserListPage.tsx"
+    ],
+    "affectedRoutes": [
+      "/users"
+    ]
+  },
+  "coverage": {
+    "totalChangedFiles": 1
+  },
+  "clusters": [
+    {
+      "clusterId": "cluster-001",
+      "title": "User List Page impact cluster",
+      "status": "analyzed",
+      "changeIntent": "form-submit-flow",
+      "userVisibleChange": "用户列表页的搜索表单新增提交处理，搜索表单从静态展示变成可触发表单提交。",
+      "affectedFunctionUnits": [
+        "用户列表页搜索表单提交",
+        "搜索按钮点击入口",
+        "提交后列表查询联动"
+      ],
+      "caseCount": 2,
+      "confidence": "medium",
+      "uncertainties": [
+        "fixture code does not show the submit handler updating query parameters or refreshing data, so list refresh is a candidate behavior to verify rather than a confirmed implementation detail"
+      ]
+    }
+  ],
+  "clusterAnalyses": [
+    {
+      "clusterId": "cluster-001",
+      "changeIntent": "form-submit-flow",
+      "userVisibleChange": "用户列表页的搜索表单新增提交处理，搜索表单从静态展示变成可触发表单提交。",
+      "affectedFunctionUnits": [
+        "用户列表页搜索表单提交",
+        "搜索按钮点击入口",
+        "提交后列表查询联动"
+      ],
+      "codeEvidenceUsed": [
+        {
+          "file": "src/components/shared/SearchForm.tsx",
+          "reason": "diff adds handleSubmit and wires it to Form onSubmit"
+        },
+        {
+          "file": "src/pages/users/UserListPage.tsx",
+          "reason": "UserListPage renders SearchForm and is bound to route /users"
+        }
+      ],
+      "docEvidenceUsed": [],
+      "confidence": "medium",
+      "uncertainties": [
+        "fixture code does not show the submit handler updating query parameters or refreshing data, so list refresh is a candidate behavior to verify rather than a confirmed implementation detail"
+      ],
+      "cases": [
+        {
+          "moduleName": "users",
+          "pageName": "User List Page",
+          "routePath": "/users",
+          "caseName": "用户列表搜索表单提交入口验证",
+          "preconditions": [
+            "用户列表页可访问"
+          ],
+          "testSteps": [
+            "进入 /users 用户列表页",
+            "定位搜索表单",
+            "点击搜索按钮或触发表单提交"
+          ],
+          "expectedResults": [
+            "搜索表单可以触发提交动作",
+            "提交过程中页面不出现白屏或异常报错",
+            "若需求要求刷新列表，应验证列表按提交条件刷新"
+          ],
+          "priority": "medium",
+          "confidence": "medium",
+          "impactReason": "SearchForm 的 Form 新增 onSubmit 绑定，且 UserListPage 使用该组件",
+          "evidence": [
+            {
+              "file": "src/components/shared/SearchForm.tsx",
+              "reason": "Form submit wiring changed"
+            },
+            {
+              "file": "src/pages/users/UserListPage.tsx",
+              "reason": "candidate page renders SearchForm"
+            }
+          ],
+          "uncertainties": [
+            "数据刷新行为需要结合真实需求或运行行为确认"
+          ]
+        },
+        {
+          "moduleName": "users",
+          "pageName": "User List Page",
+          "routePath": "/users",
+          "caseName": "用户列表搜索按钮禁用态下的提交拦截验证",
+          "preconditions": [
+            "用户列表页可访问",
+            "搜索按钮存在禁用态"
+          ],
+          "testSteps": [
+            "进入 /users 用户列表页",
+            "观察搜索按钮禁用态",
+            "尝试点击搜索按钮或通过回车触发表单提交"
+          ],
+          "expectedResults": [
+            "按钮禁用态展示符合预期",
+            "禁用态下不会触发无效提交",
+            "页面不出现异常报错"
+          ],
+          "priority": "medium",
+          "confidence": "medium",
+          "impactReason": "SearchForm 同时包含 disabled Button 和新增 Form submit wiring",
+          "evidence": [
+            {
+              "file": "src/components/shared/SearchForm.tsx",
+              "reason": "button disabled state and form submit wiring coexist in changed component"
+            }
+          ],
+          "uncertainties": []
+        }
+      ],
+      "analysisFile": "__RUN_DIR__/cluster-analysis/cluster-001.analysis.json"
+    }
+  ],
+  "orphanClusterAnalyses": [],
+  "cases": [
+    {
+      "clusterId": "cluster-001",
+      "caseSource": "cluster-analysis",
+      "moduleName": "users",
+      "pageName": "User List Page",
+      "routePath": "/users",
+      "caseName": "用户列表搜索表单提交入口验证",
+      "preconditions": [
+        "用户列表页可访问"
+      ],
+      "testSteps": [
+        "进入 /users 用户列表页",
+        "定位搜索表单",
+        "点击搜索按钮或触发表单提交"
+      ],
+      "expectedResults": [
+        "搜索表单可以触发提交动作",
+        "提交过程中页面不出现白屏或异常报错",
+        "若需求要求刷新列表，应验证列表按提交条件刷新"
+      ],
+      "priority": "medium",
+      "confidence": "medium",
+      "changeIntent": "form-submit-flow",
+      "userVisibleChange": "用户列表页的搜索表单新增提交处理，搜索表单从静态展示变成可触发表单提交。",
+      "affectedFunctionUnit": "",
+      "impactReason": "SearchForm 的 Form 新增 onSubmit 绑定，且 UserListPage 使用该组件",
+      "evidence": [
+        {
+          "file": "src/components/shared/SearchForm.tsx",
+          "reason": "Form submit wiring changed"
+        },
+        {
+          "file": "src/pages/users/UserListPage.tsx",
+          "reason": "candidate page renders SearchForm"
+        }
+      ],
+      "uncertainties": [
+        "数据刷新行为需要结合真实需求或运行行为确认"
+      ]
+    },
+    {
+      "clusterId": "cluster-001",
+      "caseSource": "cluster-analysis",
+      "moduleName": "users",
+      "pageName": "User List Page",
+      "routePath": "/users",
+      "caseName": "用户列表搜索按钮禁用态下的提交拦截验证",
+      "preconditions": [
+        "用户列表页可访问",
+        "搜索按钮存在禁用态"
+      ],
+      "testSteps": [
+        "进入 /users 用户列表页",
+        "观察搜索按钮禁用态",
+        "尝试点击搜索按钮或通过回车触发表单提交"
+      ],
+      "expectedResults": [
+        "按钮禁用态展示符合预期",
+        "禁用态下不会触发无效提交",
+        "页面不出现异常报错"
+      ],
+      "priority": "medium",
+      "confidence": "medium",
+      "changeIntent": "form-submit-flow",
+      "userVisibleChange": "用户列表页的搜索表单新增提交处理，搜索表单从静态展示变成可触发表单提交。",
+      "affectedFunctionUnit": "",
+      "impactReason": "SearchForm 同时包含 disabled Button 和新增 Form submit wiring",
+      "evidence": [
+        {
+          "file": "src/components/shared/SearchForm.tsx",
+          "reason": "button disabled state and form submit wiring coexist in changed component"
+        }
+      ],
+      "uncertainties": []
+    }
+  ],
+  "fallbackCases": []
+}

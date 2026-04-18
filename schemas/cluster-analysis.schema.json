@@ -1,0 +1,82 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://frontend-impact-analyzer.local/schemas/cluster-analysis.schema.json",
+  "title": "Frontend Impact Analyzer Cluster Analysis",
+  "type": "object",
+  "additionalProperties": true,
+  "required": [
+    "clusterId",
+    "changeIntent",
+    "userVisibleChange",
+    "affectedFunctionUnits",
+    "confidence",
+    "uncertainties",
+    "cases"
+  ],
+  "properties": {
+    "clusterId": {"type": "string"},
+    "changeIntent": {"type": "string"},
+    "userVisibleChange": {"type": "string"},
+    "affectedFunctionUnits": {
+      "type": "array",
+      "items": {"type": "string"}
+    },
+    "codeEvidenceUsed": {
+      "type": "array",
+      "items": {"type": "object"}
+    },
+    "docEvidenceUsed": {
+      "type": "array",
+      "items": {"type": "object"}
+    },
+    "confidence": {
+      "type": "string",
+      "enum": ["high", "medium", "low"]
+    },
+    "uncertainties": {
+      "type": "array",
+      "items": {"type": "string"}
+    },
+    "cases": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": true,
+        "required": [
+          "caseName",
+          "testSteps",
+          "expectedResults"
+        ],
+        "properties": {
+          "moduleName": {"type": "string"},
+          "pageName": {"type": "string"},
+          "routePath": {"type": "string"},
+          "caseName": {"type": "string"},
+          "preconditions": {
+            "type": "array",
+            "items": {"type": "string"}
+          },
+          "testSteps": {
+            "type": "array",
+            "items": {"type": "string"}
+          },
+          "expectedResults": {
+            "type": "array",
+            "items": {"type": "string"}
+          },
+          "priority": {"type": "string"},
+          "confidence": {"type": "string"},
+          "impactReason": {"type": "string"},
+          "evidence": {
+            "type": "array",
+            "items": {"type": "object"}
+          },
+          "uncertainties": {
+            "type": "array",
+            "items": {"type": "string"}
+          }
+        }
+      }
+    }
+  }
+}

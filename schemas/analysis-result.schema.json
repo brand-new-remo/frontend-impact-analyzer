@@ -1,0 +1,48 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://frontend-impact-analyzer.local/schemas/analysis-result.schema.json",
+  "title": "Frontend Impact Analyzer Result Package",
+  "type": "object",
+  "additionalProperties": true,
+  "required": [
+    "meta",
+    "summary",
+    "coverage",
+    "clusters",
+    "cases",
+    "fallbackCases",
+    "nextStepsForClaude"
+  ],
+  "properties": {
+    "meta": {
+      "type": "object",
+      "required": ["outputContract", "analysisStatus"],
+      "properties": {
+        "outputContract": {"type": "string"},
+        "runId": {"type": ["string", "null"]},
+        "analysisStatus": {
+          "type": "string",
+          "enum": ["running", "success", "partial_success", "failed", "needs_cluster_analysis"]
+        }
+      }
+    },
+    "summary": {"type": "object"},
+    "coverage": {"type": "object"},
+    "clusters": {
+      "type": "array",
+      "items": {"type": "object"}
+    },
+    "cases": {
+      "type": "array",
+      "items": {"type": "object"}
+    },
+    "fallbackCases": {
+      "type": "array",
+      "items": {"type": "object"}
+    },
+    "nextStepsForClaude": {
+      "type": "array",
+      "items": {"type": "string"}
+    }
+  }
+}

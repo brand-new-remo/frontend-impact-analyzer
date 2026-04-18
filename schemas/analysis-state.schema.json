@@ -34,12 +34,12 @@
         },
         "outputContract": {"type": "string"},
         "stateSchema": {"type": "string"},
-        "resultSchema": {"type": "string"},
-        "statusSummary": {"type": "object"}
-      }
-    },
-    "output": {
-      "$ref": "case-array.schema.json"
+          "resultSchema": {"type": "string"},
+          "statusSummary": {"type": "object"}
+        }
+      },
+      "output": {
+      "$ref": "analysis-result.schema.json"
     }
   }
 }

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import time
 from dataclasses import asdict, dataclass, field
-from typing import Dict, List, Optional, TypedDict
+from typing import Any, Dict, List, Optional, TypedDict
 
 
 class CaseOutput(TypedDict):
@@ -134,7 +134,17 @@ class AnalysisState:
         "affectedPages": [],
         "affectedFunctions": [],
     })
-    output: List[CaseOutput] = field(default_factory=list)
+    workflow: Dict = field(default_factory=lambda: {
+        "manifest": {},
+        "preflight": {},
+        "diffIndex": {},
+        "fileImpactSeeds": {},
+        "changeClusters": {},
+        "clusterAnalysisTasks": "",
+        "clusterContexts": [],
+        "coverage": {},
+    })
+    output: Any = field(default_factory=dict)
     processLogs: List[Dict] = field(default_factory=list)
 
 
