@@ -59,6 +59,7 @@ DEFAULT_CONFIG: Dict = {
         "maxSnippetChars": 5000,
         "maxClusterContextChars": 60000,
         "maxCommentEvidencePerCluster": 20,
+        "clusterContextBatchSize": 10,
         "phasedExecutionThreshold": 1000,
     },
 }

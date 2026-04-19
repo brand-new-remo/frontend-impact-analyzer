@@ -148,7 +148,16 @@ class FrontendImpactAnalysisEngine:
             document_index=document_index,
             routes=routes,
         )
-        cluster_contexts = [context_collector.collect(cluster, diff_index) for cluster in clusters.get("clusters", [])]
+        cluster_list = clusters.get("clusters", [])
+        batch_size = int(self.config["analysis"].get("clusterContextBatchSize", 10))
+        total = len(cluster_list)
+        print(f"[cluster] collecting context for {total} clusters (batch size {batch_size})...", flush=True)
+        cluster_contexts = []
+        for batch_start in range(0, total, batch_size):
+            batch_end = min(batch_start + batch_size, total)
+            for cluster in cluster_list[batch_start:batch_end]:
+                cluster_contexts.append(context_collector.collect(cluster, diff_index))
+            print(f"[cluster]   {batch_end}/{total} clusters processed", flush=True)
         coverage = cluster_builder.build_coverage(diff_index, clusters, diagnostics)
         cluster_tasks = build_cluster_task_markdown(clusters, coverage)
         self.state.workflow["diffIndex"] = diff_index
@@ -553,15 +562,24 @@ def run_phase_cluster(args, project_root: Path, config: dict) -> None:
     t3 = _time.monotonic()
     print(f"[phase:cluster] document index built ({t3 - t2:.1f}s)", flush=True)
 
-    # --- Context collection ---
+    # --- Context collection (batched) ---
     cluster_list = clusters.get("clusters", [])
-    print(f"[phase:cluster] collecting context for {len(cluster_list)} clusters...", flush=True)
+    batch_size = int(config["analysis"].get("clusterContextBatchSize", 10))
+    total = len(cluster_list)
+    print(f"[phase:cluster] collecting context for {total} clusters (batch size {batch_size})...", flush=True)
     context_collector = ClusterContextCollector(
         project_root, config,
         imports=imports, reverse_imports=reverse_imports,
         ast_facts=ast_facts, document_index=document_index, routes=routes,
     )
-    cluster_contexts = [context_collector.collect(cluster, diff_index) for cluster in cluster_list]
+    cluster_contexts = []
+    for batch_start in range(0, total, batch_size):
+        batch_end = min(batch_start + batch_size, total)
+        batch = cluster_list[batch_start:batch_end]
+        for cluster in batch:
+            cluster_contexts.append(context_collector.collect(cluster, diff_index))
+        elapsed = _time.monotonic() - t3
+        print(f"[phase:cluster]   {batch_end}/{total} clusters processed ({elapsed:.1f}s)", flush=True)
     t4 = _time.monotonic()
     print(f"[phase:cluster] context collected ({t4 - t3:.1f}s)", flush=True)
 
