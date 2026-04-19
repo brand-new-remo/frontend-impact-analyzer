@@ -26,6 +26,7 @@ from analyzer.workflow import (
     install_claude_agents,
     load_config,
     make_diff_file,
+    make_phase_logger,
     preflight,
     validate_phase_prerequisites,
     write_default_config,
@@ -149,15 +150,23 @@ class FrontendImpactAnalysisEngine:
             routes=routes,
         )
         cluster_list = clusters.get("clusters", [])
+        deep_clusters = [c for c in cluster_list if c.get("needsDeepAnalysis")]
+        shallow_clusters = [c for c in cluster_list if not c.get("needsDeepAnalysis")]
         batch_size = int(self.config["analysis"].get("clusterContextBatchSize", 10))
-        total = len(cluster_list)
-        print(f"[cluster] collecting context for {total} clusters (batch size {batch_size})...", flush=True)
+        total_deep = len(deep_clusters)
+        print(
+            f"[cluster] collecting context: {total_deep} deep + {len(shallow_clusters)} shallow "
+            f"(batch size {batch_size})...",
+            flush=True,
+        )
         cluster_contexts = []
-        for batch_start in range(0, total, batch_size):
-            batch_end = min(batch_start + batch_size, total)
-            for cluster in cluster_list[batch_start:batch_end]:
+        for batch_start in range(0, total_deep, batch_size):
+            batch_end = min(batch_start + batch_size, total_deep)
+            for cluster in deep_clusters[batch_start:batch_end]:
                 cluster_contexts.append(context_collector.collect(cluster, diff_index))
-            print(f"[cluster]   {batch_end}/{total} clusters processed", flush=True)
+            print(f"[cluster]   {batch_end}/{total_deep} deep clusters processed", flush=True)
+        for cluster in shallow_clusters:
+            cluster_contexts.append(context_collector.collect_stub(cluster))
         coverage = cluster_builder.build_coverage(diff_index, clusters, diagnostics)
         cluster_tasks = build_cluster_task_markdown(clusters, coverage)
         self.state.workflow["diffIndex"] = diff_index
@@ -194,6 +203,8 @@ class FrontendImpactAnalysisEngine:
         write_json(run_dir / "05-change-clusters.json", state.workflow["changeClusters"])
         (run_dir / "06-cluster-analysis-tasks.md").write_text(state.workflow["clusterAnalysisTasks"], encoding="utf-8")
         for context in state.workflow["clusterContexts"]:
+            if context.get("shallow"):
+                continue  # skip writing individual files for shallow clusters
             write_json(run_dir / "cluster-context" / f"{context['clusterId']}.json", context)
         write_json(run_dir / "90-coverage-report.json", state.workflow["coverage"])
         # Use to_dict() instead of asdict() — avoids recursive deep-copy on
@@ -300,15 +311,16 @@ def run_phase_parse(args, project_root: Path, config: dict) -> None:
 
     manifest = build_run_manifest(project_root, config, args.base_branch, args.compare_branch, diff_file)
     run_dir = ensure_run_dir(manifest)
+    log = make_phase_logger(run_dir)
     preflight_report = preflight(project_root, config)
     t1 = _time.monotonic()
-    print(f"[phase:parse] preflight done ({t1 - t0:.1f}s)", flush=True)
+    log(f"[phase:parse] preflight done ({t1 - t0:.1f}s)")
 
     if preflight_report.get("status") == "blocked":
         write_json(run_dir / "00-run-manifest.json", manifest)
         write_json(run_dir / "01-preflight-report.json", preflight_report)
-        print(f"[phase:parse] preflight blocked: {', '.join(preflight_report.get('blockingActions', []))}")
-        print(f"[phase:parse] run dir: {run_dir}")
+        log(f"[phase:parse] preflight blocked: {', '.join(preflight_report.get('blockingActions', []))}")
+        log(f"[phase:parse] run dir: {run_dir}")
         raise SystemExit(2)
 
     commit_types, changed_files = GitDiffParser(diff_text).parse()
@@ -320,7 +332,7 @@ def run_phase_parse(args, project_root: Path, config: dict) -> None:
         cf.module_guess = classifier.guess_module(cf.path)
         cf.global_classification = global_classifier.classify(cf.path, cf.file_type, cf.semantic_tags)
     t2 = _time.monotonic()
-    print(f"[phase:parse] diff parsed & classified ({t2 - t1:.1f}s)", flush=True)
+    log(f"[phase:parse] diff parsed & classified ({t2 - t1:.1f}s)")
 
     write_json(run_dir / "00-run-manifest.json", manifest)
     write_json(run_dir / "01-preflight-report.json", preflight_report)
@@ -341,9 +353,9 @@ def run_phase_parse(args, project_root: Path, config: dict) -> None:
         {"step": "write_checkpoint", "seconds": round(t3 - t2, 2)},
     ])
 
-    print(f"[phase:parse] parsed {len(changed_files)} changed files, {len(commit_types)} commit types ({t3 - t0:.1f}s)")
-    print(f"[phase:parse] run dir: {run_dir}")
-    print(f'[phase:parse] next: --phase scan --run-dir "{run_dir}"')
+    log(f"[phase:parse] parsed {len(changed_files)} changed files, {len(commit_types)} commit types ({t3 - t0:.1f}s)")
+    log(f"[phase:parse] run dir: {run_dir}")
+    log(f'[phase:parse] next: --phase scan --run-dir "{run_dir}"')
 
 
 def run_phase_scan(args, project_root: Path, config: dict) -> None:
@@ -352,6 +364,7 @@ def run_phase_scan(args, project_root: Path, config: dict) -> None:
     if not args.run_dir:
         raise SystemExit("--run-dir is required for --phase scan.")
     run_dir = Path(args.run_dir).resolve()
+    log = make_phase_logger(run_dir)
 
     t0 = _time.monotonic()
     prior = validate_phase_prerequisites(run_dir, "scan", project_root)
@@ -359,16 +372,16 @@ def run_phase_scan(args, project_root: Path, config: dict) -> None:
 
     changed_file_paths = [cf["path"] for cf in parse_data["changedFiles"]]
     t1 = _time.monotonic()
-    print(f"[phase:scan] prerequisites loaded ({t1 - t0:.1f}s)", flush=True)
+    log(f"[phase:scan] prerequisites loaded ({t1 - t0:.1f}s)")
 
-    print("[phase:scan] scanning project...", flush=True)
+    log("[phase:scan] scanning project...")
     scanner = ProjectScanner(project_root)
     (imports, reverse_imports, pages, routes,
      ast_facts, aliases, barrel_files, barrel_evidence, diagnostics) = scanner.scan(
         changed_file_paths=changed_file_paths,
     )
     t2 = _time.monotonic()
-    print(f"[phase:scan] scan complete ({t2 - t1:.1f}s)", flush=True)
+    log(f"[phase:scan] scan complete ({t2 - t1:.1f}s)")
 
     checkpoint = build_phase_checkpoint(
         "scan", project_root,
@@ -391,9 +404,9 @@ def run_phase_scan(args, project_root: Path, config: dict) -> None:
         {"step": "write_checkpoint", "seconds": round(t3 - t2, 2)},
     ])
 
-    print(f"[phase:scan] scanned {len(imports)} files, {len(pages)} pages, {len(routes)} routes ({t3 - t0:.1f}s)")
-    print(f"[phase:scan] run dir: {run_dir}")
-    print(f'[phase:scan] next: --phase impact --run-dir "{run_dir}"')
+    log(f"[phase:scan] scanned {len(imports)} files, {len(pages)} pages, {len(routes)} routes ({t3 - t0:.1f}s)")
+    log(f"[phase:scan] run dir: {run_dir}")
+    log(f'[phase:scan] next: --phase impact --run-dir "{run_dir}"')
 
 
 def run_phase_impact(args, project_root: Path, config: dict) -> None:
@@ -402,9 +415,10 @@ def run_phase_impact(args, project_root: Path, config: dict) -> None:
     if not args.run_dir:
         raise SystemExit("--run-dir is required for --phase impact.")
     run_dir = Path(args.run_dir).resolve()
+    log = make_phase_logger(run_dir)
 
     t0 = _time.monotonic()
-    print("[phase:impact] loading checkpoints...", flush=True)
+    log("[phase:impact] loading checkpoints...")
     prior = validate_phase_prerequisites(run_dir, "impact", project_root)
     parse_data = prior["parse"]
     scan_data = prior["scan"]
@@ -417,9 +431,9 @@ def run_phase_impact(args, project_root: Path, config: dict) -> None:
     ast_facts = scan_data.get("astFacts", {})
     diagnostics = scan_data.get("diagnostics", [])
     t1 = _time.monotonic()
-    print(f"[phase:impact] checkpoints loaded ({t1 - t0:.1f}s)", flush=True)
+    log(f"[phase:impact] checkpoints loaded ({t1 - t0:.1f}s)")
 
-    print(f"[phase:impact] tracing {len(changed_files)} changed files...", flush=True)
+    log(f"[phase:impact] tracing {len(changed_files)} changed files...")
     analyzer = ImpactAnalyzer(
         imports=imports, reverse_imports=reverse_imports,
         pages=pages, routes=routes, ast_facts=ast_facts,
@@ -449,7 +463,7 @@ def run_phase_impact(args, project_root: Path, config: dict) -> None:
     candidate_pages_list = uniq_keep_order([x.page_file for x in page_impacts if x.page_file])
     structural_hints = uniq_keep_order([tag for x in page_impacts for tag in x.semantic_tags])
     t2 = _time.monotonic()
-    print(f"[phase:impact] traced {len(page_impacts)} page impacts, {len(unresolved)} unresolved ({t2 - t1:.1f}s)", flush=True)
+    log(f"[phase:impact] traced {len(page_impacts)} page impacts, {len(unresolved)} unresolved ({t2 - t1:.1f}s)")
 
     checkpoint = build_phase_checkpoint(
         "impact", project_root,
@@ -470,8 +484,8 @@ def run_phase_impact(args, project_root: Path, config: dict) -> None:
         {"step": "write_checkpoint", "seconds": round(t3 - t2, 2)},
     ])
 
-    print(f"[phase:impact] run dir: {run_dir}")
-    print(f'[phase:impact] next: --phase cluster --run-dir "{run_dir}"')
+    log(f"[phase:impact] run dir: {run_dir}")
+    log(f'[phase:impact] next: --phase cluster --run-dir "{run_dir}"')
 
 
 def run_phase_cluster(args, project_root: Path, config: dict) -> None:
@@ -480,9 +494,10 @@ def run_phase_cluster(args, project_root: Path, config: dict) -> None:
     if not args.run_dir:
         raise SystemExit("--run-dir is required for --phase cluster.")
     run_dir = Path(args.run_dir).resolve()
+    log = make_phase_logger(run_dir)
 
     t0 = _time.monotonic()
-    print("[phase:cluster] loading checkpoints...", flush=True)
+    log("[phase:cluster] loading checkpoints...")
     prior = validate_phase_prerequisites(run_dir, "cluster", project_root)
     parse_data = prior["parse"]
     scan_data = prior["scan"]
@@ -519,7 +534,7 @@ def run_phase_cluster(args, project_root: Path, config: dict) -> None:
     preflight_file = run_dir / "01-preflight-report.json"
     preflight_report = json.loads(preflight_file.read_text(encoding="utf-8")) if preflight_file.exists() else {}
     t1 = _time.monotonic()
-    print(f"[phase:cluster] checkpoints loaded ({t1 - t0:.1f}s)", flush=True)
+    log(f"[phase:cluster] checkpoints loaded ({t1 - t0:.1f}s)")
 
     # Create engine and pre-populate state from checkpoints
     engine = FrontendImpactAnalysisEngine(
@@ -545,7 +560,7 @@ def run_phase_cluster(args, project_root: Path, config: dict) -> None:
     engine.state.businessImpact["affectedFunctions"] = structural_hints
 
     # --- Build clusters ---
-    print("[phase:cluster] building clusters...", flush=True)
+    log("[phase:cluster] building clusters...")
     cluster_builder = ChangeClusterBuilder(diff_text)
     diff_index = cluster_builder.build_diff_index(changed_files)
     seeds = cluster_builder.build_file_impact_seeds(changed_files, page_impacts, unresolved)
@@ -554,34 +569,42 @@ def run_phase_cluster(args, project_root: Path, config: dict) -> None:
         max_deep_clusters=int(config["analysis"].get("maxClustersForDeepAnalysis", 30)),
     )
     t2 = _time.monotonic()
-    print(f"[phase:cluster] {len(clusters.get('clusters', []))} clusters built ({t2 - t1:.1f}s)", flush=True)
+    log(f"[phase:cluster] {len(clusters.get('clusters', []))} clusters built ({t2 - t1:.1f}s)")
 
     # --- Document index ---
-    print("[phase:cluster] building document index...", flush=True)
+    log("[phase:cluster] building document index...")
     document_index = DocumentIndexer(project_root, config).build()
     t3 = _time.monotonic()
-    print(f"[phase:cluster] document index built ({t3 - t2:.1f}s)", flush=True)
+    log(f"[phase:cluster] document index built ({t3 - t2:.1f}s)")
 
-    # --- Context collection (batched) ---
+    # --- Context collection (batched, deep-only) ---
     cluster_list = clusters.get("clusters", [])
+    deep_clusters = [c for c in cluster_list if c.get("needsDeepAnalysis")]
+    shallow_clusters = [c for c in cluster_list if not c.get("needsDeepAnalysis")]
     batch_size = int(config["analysis"].get("clusterContextBatchSize", 10))
-    total = len(cluster_list)
-    print(f"[phase:cluster] collecting context for {total} clusters (batch size {batch_size})...", flush=True)
+    total_deep = len(deep_clusters)
+    log(
+        f"[phase:cluster] collecting context: {total_deep} deep + {len(shallow_clusters)} shallow "
+        f"(batch size {batch_size})..."
+    )
     context_collector = ClusterContextCollector(
         project_root, config,
         imports=imports, reverse_imports=reverse_imports,
         ast_facts=ast_facts, document_index=document_index, routes=routes,
     )
     cluster_contexts = []
-    for batch_start in range(0, total, batch_size):
-        batch_end = min(batch_start + batch_size, total)
-        batch = cluster_list[batch_start:batch_end]
-        for cluster in batch:
+    # Full context for deep-analysis clusters only
+    for batch_start in range(0, total_deep, batch_size):
+        batch_end = min(batch_start + batch_size, total_deep)
+        for cluster in deep_clusters[batch_start:batch_end]:
             cluster_contexts.append(context_collector.collect(cluster, diff_index))
         elapsed = _time.monotonic() - t3
-        print(f"[phase:cluster]   {batch_end}/{total} clusters processed ({elapsed:.1f}s)", flush=True)
+        log(f"[phase:cluster]   {batch_end}/{total_deep} deep clusters processed ({elapsed:.1f}s)")
+    # Lightweight stubs for shallow clusters (no file I/O)
+    for cluster in shallow_clusters:
+        cluster_contexts.append(context_collector.collect_stub(cluster))
     t4 = _time.monotonic()
-    print(f"[phase:cluster] context collected ({t4 - t3:.1f}s)", flush=True)
+    log(f"[phase:cluster] context collected ({t4 - t3:.1f}s)")
 
     coverage = cluster_builder.build_coverage(diff_index, clusters, diagnostics)
     cluster_tasks = build_cluster_task_markdown(clusters, coverage)
@@ -607,14 +630,14 @@ def run_phase_cluster(args, project_root: Path, config: dict) -> None:
     engine.state.output["meta"]["analysisStatus"] = engine.state.meta["analysisStatus"]
     engine.state.output["summary"]["statusSummary"] = engine.state.meta["statusSummary"]
 
-    print("[phase:cluster] writing artifacts...", flush=True)
+    log("[phase:cluster] writing artifacts...")
     engine.write_run_artifacts(run_dir, engine.state)
     if args.state_output:
         write_json(Path(args.state_output), engine.state.to_dict())
     if args.result_output:
         write_json(Path(args.result_output), engine.state.output)
     t5 = _time.monotonic()
-    print(f"[phase:cluster] artifacts written ({t5 - t4:.1f}s)", flush=True)
+    log(f"[phase:cluster] artifacts written ({t5 - t4:.1f}s)")
 
     append_phase_timing(run_dir, "cluster", [
         {"step": "load_checkpoints", "seconds": round(t1 - t0, 2)},
@@ -624,9 +647,9 @@ def run_phase_cluster(args, project_root: Path, config: dict) -> None:
         {"step": "write_artifacts", "seconds": round(t5 - t4, 2)},
     ])
 
-    print(f"[phase:cluster] total: {len(page_impacts)} impacts, {len(cluster_list)} clusters ({t5 - t0:.1f}s)")
-    print(f"[phase:cluster] run artifacts written to: {run_dir}")
-    print(f"[phase:cluster] result: {run_dir / '99-final-result.json'}")
+    log(f"[phase:cluster] total: {len(page_impacts)} impacts, {len(cluster_list)} clusters ({t5 - t0:.1f}s)")
+    log(f"[phase:cluster] run artifacts written to: {run_dir}")
+    log(f"[phase:cluster] result: {run_dir / '99-final-result.json'}")
 
 
 def run_phase_analyze(args, project_root: Path, config: dict) -> None:

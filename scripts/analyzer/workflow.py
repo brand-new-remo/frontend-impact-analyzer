@@ -505,6 +505,23 @@ def validate_phase_prerequisites(
     return loaded
 
 
+def make_phase_logger(run_dir: Path):
+    """Return a log function that prints to stdout AND appends to run.log."""
+    log_path = run_dir / "run.log"
+    log_path.parent.mkdir(parents=True, exist_ok=True)
+
+    def log(msg: str) -> None:
+        stamped = f"{time.strftime('%H:%M:%S')} {msg}"
+        print(msg, flush=True)
+        try:
+            with open(log_path, "a", encoding="utf-8") as fh:
+                fh.write(stamped + "\n")
+        except OSError:
+            pass  # never let log I/O break the analysis
+
+    return log
+
+
 def append_phase_timing(run_dir: Path, phase: str, steps: List[Dict]) -> None:
     """Append one phase's timing data to phase-timings.json in the run dir."""
     path = run_dir / "phase-timings.json"

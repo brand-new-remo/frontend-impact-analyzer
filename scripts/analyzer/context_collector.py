@@ -238,6 +238,29 @@ class ClusterContextCollector:
         }
         return self._apply_context_budget(context)
 
+    def collect_stub(self, cluster: Dict) -> Dict:
+        """Lightweight context for clusters that do not need deep analysis.
+
+        Skips all file I/O (source reads, document retrieval, comment scanning)
+        and only captures the structural summary already present in the cluster
+        dict.  This makes processing hundreds of shallow clusters near-instant.
+        """
+        return {
+            "clusterId": cluster["clusterId"],
+            "clusterSummary": {
+                "title": cluster.get("title", ""),
+                "changedFiles": cluster.get("changedFiles", []),
+                "changedSymbols": cluster.get("changedSymbols", []),
+                "candidatePages": cluster.get("candidatePages", []),
+                "candidateRoutes": cluster.get("candidateRoutes", []),
+                "semanticTags": cluster.get("semanticTags", []),
+                "confidence": cluster.get("confidence", "low"),
+                "reason": cluster.get("reason", ""),
+            },
+            "shallow": True,
+            "note": "This cluster was not selected for deep analysis. No code/document context was collected.",
+        }
+
     def _context_files(self, cluster: Dict) -> List[str]:
         files: List[str] = []
         files.extend(cluster.get("changedFiles", []))
