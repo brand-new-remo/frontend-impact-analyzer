@@ -113,7 +113,7 @@ class ChangeClusterBuilder:
             symbols = uniq_keep_order([symbol for seed in seeds for symbol in seed.get("symbols", [])])
             api_changes = [change for seed in seeds for change in seed.get("apiChanges", [])]
             confidence = self._cluster_confidence(kind, seeds)
-            needs_deep = idx <= max_deep_clusters and any(seed.get("confidence") != "low" for seed in seeds)
+            has_signal = any(seed.get("confidence") != "low" for seed in seeds)
             cluster_id = f"cluster-{idx:03d}"
             title = self._cluster_title(kind, key, pages, seeds)
             clusters.append({
@@ -130,11 +130,19 @@ class ChangeClusterBuilder:
                 "globalClassification": self._merge_global_classification(seeds),
                 "reason": self._cluster_reason(kind, pages),
                 "confidence": confidence,
-                "needsDeepAnalysis": needs_deep,
+                "needsDeepAnalysis": has_signal,  # preliminary; capped below
                 "seeds": seeds,
             })
 
+        # Sort by quality: deep-worthy first, then by key/id.
         clusters.sort(key=lambda item: (not item["needsDeepAnalysis"], item["clusterKey"], item["clusterId"]))
+        # Cap deep-analysis count to the configured limit.
+        deep_count = 0
+        for cluster in clusters:
+            if cluster["needsDeepAnalysis"]:
+                deep_count += 1
+                if deep_count > max_deep_clusters:
+                    cluster["needsDeepAnalysis"] = False
         return {
             "clusterCount": len(clusters),
             "clusters": clusters,

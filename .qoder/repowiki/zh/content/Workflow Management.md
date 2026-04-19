@@ -13,16 +13,24 @@
 - [pyproject.toml](file://pyproject.toml)
 </cite>
 
+## 更新摘要
+**所做更改**
+- 新增日志记录功能章节，详细介绍 make_phase_logger 函数的实现和使用
+- 更新可观测性章节，说明 run.log 文件的持久化记录功能
+- 增强故障排除指南，包含日志文件的诊断方法
+- 更新架构概览，反映增强的日志记录能力
+
 ## 目录
 1. [简介](#简介)
 2. [项目结构](#项目结构)
 3. [核心组件](#核心组件)
 4. [架构概览](#架构概览)
 5. [详细组件分析](#详细组件分析)
-6. [依赖关系分析](#依赖关系分析)
-7. [性能考虑](#性能考虑)
-8. [故障排除指南](#故障排除指南)
-9. [结论](#结论)
+6. [日志记录功能](#日志记录功能)
+7. [依赖关系分析](#依赖关系分析)
+8. [性能考虑](#性能考虑)
+9. [故障排除指南](#故障排除指南)
+10. [结论](#结论)
 
 ## 简介
 
@@ -34,6 +42,7 @@
 - 提供完整的中间产物检查点
 - 实现人机协作的案例生成流程
 - 确保分析结果的可追溯性和可验证性
+- **新增：提供实时可观测性，支持同时输出到stdout和持久化到run.log**
 
 ## 项目结构
 
@@ -45,6 +54,7 @@ subgraph "核心分析引擎"
 FEIA[front_end_impact_analyzer.py]
 Models[models.py]
 Workflow[workflow.py]
+LogSystem[日志记录系统]
 end
 subgraph "分析器模块"
 DiffParser[diff_parser.py]
@@ -66,6 +76,7 @@ Fixtures[fixtures/]
 end
 FEIA --> Models
 FEIA --> Workflow
+FEIA --> LogSystem
 FEIA --> DiffParser
 FEIA --> ProjectScanner
 FEIA --> ImpactEngine
@@ -76,7 +87,7 @@ FEIA --> ResultMerger
 
 **图表来源**
 - [scripts/front_end_impact_analyzer.py:1-884](file://scripts/front_end_impact_analyzer.py#L1-L884)
-- [scripts/analyzer/workflow.py:1-524](file://scripts/analyzer/workflow.py#L1-L524)
+- [scripts/analyzer/workflow.py:1-541](file://scripts/analyzer/workflow.py#L1-L541)
 
 **章节来源**
 - [scripts/front_end_impact_analyzer.py:1-884](file://scripts/front_end_impact_analyzer.py#L1-L884)
@@ -118,7 +129,7 @@ AnalysisState --> StateStore : "uses"
 **图表来源**
 - [scripts/analyzer/models.py:115-200](file://scripts/analyzer/models.py#L115-L200)
 
-### 分阶段工作流
+### 分阶段性工作流
 
 系统实现了五阶段的分析工作流，每个阶段都有明确的输入输出和检查点：
 
@@ -161,6 +172,7 @@ subgraph "工作流管理层"
 WorkflowMgr[工作流管理器]
 PhaseMgr[阶段管理器]
 CheckpointMgr[检查点管理器]
+LogMgr[日志管理器]
 end
 subgraph "分析引擎层"
 DiffEngine[差异解析引擎]
@@ -172,11 +184,13 @@ subgraph "数据存储层"
 StateStore[状态存储]
 ArtifactStore[产物存储]
 ConfigStore[配置存储]
+LogStore[日志存储]
 end
 CLI --> WorkflowMgr
 Agent --> WorkflowMgr
 WorkflowMgr --> PhaseMgr
 PhaseMgr --> CheckpointMgr
+PhaseMgr --> LogMgr
 PhaseMgr --> DiffEngine
 PhaseMgr --> ScanEngine
 PhaseMgr --> ImpactEngine
@@ -187,6 +201,7 @@ ImpactEngine --> StateStore
 ClusterEngine --> StateStore
 StateStore --> ArtifactStore
 WorkflowMgr --> ConfigStore
+LogMgr --> LogStore
 ```
 
 **图表来源**
@@ -242,7 +257,7 @@ Doctor-->>User : 返回检查报告
 **图表来源**
 - [scripts/analyzer/workflow.py:166-257](file://scripts/analyzer/workflow.py#L166-L257)
 
-### 分阶段执行机制
+### 分阶段性执行机制
 
 系统支持灵活的分阶段执行模式：
 
@@ -337,6 +352,63 @@ Result --> Merged
 **章节来源**
 - [scripts/front_end_impact_analyzer.py:188-218](file://scripts/front_end_impact_analyzer.py#L188-L218)
 
+## 日志记录功能
+
+### make_phase_logger 函数实现
+
+系统引入了强大的日志记录功能，通过 `make_phase_logger` 函数提供同时输出到stdout和持久化到run.log的能力：
+
+```mermaid
+flowchart TD
+LoggerFactory[make_phase_logger工厂函数] --> LogFunction[返回的日志函数]
+LogFunction --> StdoutOutput[标准输出打印]
+LogFunction --> FileOutput[run.log文件追加]
+LogFunction --> Timestamp[时间戳格式化]
+LogFunction --> SafeIO[安全I/O操作]
+StdoutOutput --> Console[终端显示]
+FileOutput --> LogFile[run.log文件]
+Timestamp --> FormattedMsg[格式化消息]
+SafeIO --> ErrorHandling[错误处理]
+ErrorHandling --> NoFailure[永不中断分析]
+```
+
+**图表来源**
+- [scripts/analyzer/workflow.py:508-522](file://scripts/analyzer/workflow.py#L508-L522)
+
+### 日志记录使用模式
+
+所有分析阶段都统一使用新的日志记录系统：
+
+```mermaid
+sequenceDiagram
+participant Phase as 分析阶段
+participant Logger as 日志记录器
+participant Console as 终端
+participant File as run.log文件
+Phase->>Logger : 创建日志记录器
+Logger->>Console : 实时输出进度
+Logger->>File : 持久化记录
+Console-->>Phase : 即时反馈
+File-->>Phase : 后续审计
+```
+
+**图表来源**
+- [scripts/front_end_impact_analyzer.py:298-496](file://scripts/front_end_impact_analyzer.py#L298-L496)
+
+### 日志记录器特性
+
+新的日志记录系统具有以下关键特性：
+
+1. **双通道输出**: 同时向stdout和run.log文件输出
+2. **时间戳格式**: 自动添加HH:MM:SS格式的时间戳
+3. **安全I/O**: 异常处理确保日志记录不会中断分析流程
+4. **自动创建**: 自动创建run.log文件及其父目录
+5. **统一格式**: 标准化的消息格式便于解析和审计
+
+**章节来源**
+- [scripts/analyzer/workflow.py:508-522](file://scripts/analyzer/workflow.py#L508-L522)
+- [scripts/front_end_impact_analyzer.py:298-496](file://scripts/front_end_impact_analyzer.py#L298-L496)
+
 ## 依赖关系分析
 
 ### 外部依赖管理
@@ -385,6 +457,7 @@ FrontEnd --> ResultMerger[result_merger.py]
 Workflow --> Common[common.py]
 ClusterBuilder --> ClusterTasks[cluster_tasks.py]
 ContextCollector --> DocumentIndexer[context_collector.py]
+LogSystem[日志记录系统] --> Workflow
 ```
 
 **图表来源**
@@ -403,6 +476,7 @@ ContextCollector --> DocumentIndexer[context_collector.py]
 1. **阈值自动分阶段**: 当差异行数超过配置阈值时，自动切换到分阶段执行模式
 2. **批处理上下文收集**: 对深度分析的聚类进行批处理，减少I/O开销
 3. **状态数据压缩**: 在最终状态文件中移除大型数据结构，只保留必要信息
+4. **日志异步处理**: 新的日志记录器使用非阻塞I/O，避免影响分析性能
 
 ### 内存优化策略
 
@@ -413,6 +487,8 @@ Strip --> CompactJSON[紧凑JSON格式]
 CompactJSON --> FastIO[快速序列化]
 LargeState --> BatchProcessing[分批处理]
 BatchProcessing --> MemoryEfficient[内存高效]
+LogSystem[日志系统] --> NonBlockingIO[非阻塞I/O]
+NonBlockingIO --> PerformanceMaintained[性能保持]
 ```
 
 **图表来源**
@@ -436,11 +512,16 @@ Check2 --> |完整| Check3{"项目根路径"}
 Check3 --> |不匹配| RootPath[根路径不匹配]
 Check3 --> |匹配| Check4{"时间戳"}
 Check4 --> |异常| Timestamp[时间戳异常]
-Check4 --> |正常| Success[分析成功]
-Preflight --> Resolution1[解决预检问题]
-Prereq --> Resolution2[先运行前置阶段]
-RootPath --> Resolution3[修正项目根路径]
-Timestamp --> Resolution4[重新运行相关阶段]
+Check4 --> |正常| Check5{"日志文件"}
+Check5 --> |异常| LogFile[日志文件问题]
+Check5 --> |正常| Success[分析成功]
+LogFile --> LogDiagnosis[检查run.log文件]
+LogDiagnosis --> Resolution1[解决日志权限问题]
+Preflight --> Resolution2[解决预检问题]
+Prereq --> Resolution3[先运行前置阶段]
+RootPath --> Resolution4[修正项目根路径]
+Timestamp --> Resolution5[重新运行相关阶段]
+Success --> Resolution6[问题已解决]
 ```
 
 **图表来源**
@@ -455,6 +536,16 @@ Timestamp --> Resolution4[重新运行相关阶段]
 3. **工具链检查**: 确认uv包管理器可用
 4. **虚拟环境隔离**: 检测可能的虚拟环境冲突
 
+### 日志文件诊断
+
+**新增**：利用run.log文件进行故障诊断：
+
+1. **检查日志完整性**: 确认run.log文件存在且包含完整的分析步骤
+2. **验证时间戳**: 检查日志中的时间戳是否连续且合理
+3. **分析错误模式**: 查找以"[phase:"开头的错误消息
+4. **定位失败点**: 通过最后一条日志确定分析失败的具体阶段
+5. **权限检查**: 确保分析目录具有写入权限
+
 **章节来源**
 - [scripts/analyzer/workflow.py:166-257](file://scripts/analyzer/workflow.py#L166-L257)
 - [scripts/analyzer/workflow.py:476-505](file://scripts/analyzer/workflow.py#L476-L505)
@@ -468,5 +559,13 @@ Timestamp --> Resolution4[重新运行相关阶段]
 3. **可靠性**: 完善的检查点机制和错误处理
 4. **效率性**: 针对大规模项目的性能优化
 5. **可用性**: 友好的命令行接口和智能体集成
+6. **可观测性**: **新增** 增强的日志记录功能，提供实时监控和持久化审计
 
-该系统为前端变更影响分析提供了一个完整、可靠且高效的解决方案，特别适合在大型React项目中实施持续的质量保证流程。
+**新增功能总结**：
+- **实时日志输出**: 所有分析阶段都提供即时的进度反馈
+- **持久化记录**: run.log文件保存完整的分析过程
+- **统一格式**: 标准化的日志格式便于自动化处理
+- **安全可靠**: 异常处理确保日志记录不影响分析流程
+- **审计能力**: 支持事后分析和问题排查
+
+该系统为前端变更影响分析提供了一个完整、可靠且高效的解决方案，特别适合在大型React项目中实施持续的质量保证流程。新增的日志记录功能显著提升了系统的可观测性和可维护性，为复杂项目的调试和监控提供了强有力的支持。

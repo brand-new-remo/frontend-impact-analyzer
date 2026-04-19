@@ -53,7 +53,7 @@ DEFAULT_CONFIG: Dict = {
         "requireRepoWiki": True,
         "requireRequirements": False,
         "requireSpecs": False,
-        "maxClustersForDeepAnalysis": 30,
+        "maxClustersForDeepAnalysis": 500,
         "maxFilesPerClusterContext": 8,
         "maxDocumentSnippetsPerCluster": 6,
         "maxSnippetChars": 5000,

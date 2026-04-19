@@ -8,8 +8,19 @@
 - [scripts/analyzer/common.py](file://scripts/analyzer/common.py)
 - [scripts/analyzer/project_scanner.py](file://scripts/analyzer/project_scanner.py)
 - [scripts/analyzer/diff_parser.py](file://scripts/analyzer/diff_parser.py)
+- [scripts/analyzer/cluster_builder.py](file://scripts/analyzer/cluster_builder.py)
+- [scripts/analyzer/cluster_tasks.py](file://scripts/analyzer/cluster_tasks.py)
+- [scripts/analyzer/workflow.py](file://scripts/analyzer/workflow.py)
+- [scripts/analyzer/result_merger.py](file://scripts/analyzer/result_merger.py)
 - [tests/test_impact_engine.py](file://tests/test_impact_engine.py)
 </cite>
+
+## 更新摘要
+**变更内容**
+- 更新集群分析阶段的批处理执行机制
+- 新增深分析和浅分析集群分离处理的详细说明
+- 增强对大量浅集群优化处理能力的描述
+- 添加新的配置参数说明和最佳实践
 
 ## 目录
 1. [简介](#简介)
@@ -28,6 +39,8 @@
 FrontendImpactAnalysisEngine是前端影响分析引擎的核心类，负责执行完整的前端变更影响分析流程。该引擎通过解析Git diff、扫描项目结构、分析代码依赖关系，最终生成影响分析报告和测试用例建议。
 
 该引擎采用模块化设计，将复杂的分析流程分解为多个独立的处理阶段，每个阶段都有明确的输入输出和错误处理机制。引擎支持React、React Router和Vite项目的前端变更影响分析，能够自动识别页面、路由、组件等关键元素，并追踪变更的影响范围。
+
+**更新** 引擎现已支持集群分析阶段的重大改进，包括批处理执行机制、深分析和浅分析集群的分离处理，以及对大量浅集群的优化处理能力。
 
 ## 项目结构
 
@@ -147,7 +160,7 @@ Engine->>Analyzer : 分析影响
 Analyzer-->>Engine : 返回页面影响结果
 Engine->>Clusters : 构建变更聚类
 Clusters-->>Engine : 返回聚类结果
-Engine->>Context : 收集上下文信息
+Engine->>Context : 批量收集上下文信息
 Context-->>Engine : 返回上下文数据
 Engine-->>Client : 返回AnalysisState
 ```
@@ -185,12 +198,35 @@ FrontendImpactAnalysisEngine.run()方法是整个分析流程的核心，执行�
 4. **影响评估**：计算影响类型、置信度和原因
 5. **结果聚合**：汇总所有页面影响结果
 
-#### 第四阶段：中间产物构建（build_intermediates）
+#### 第四阶段：集群分析（cluster_analysis）
 
-1. **变更聚类**：将相关的变更组织成集群
-2. **上下文收集**：为每个聚类收集相关文档和代码上下文
-3. **覆盖率分析**：计算分析覆盖率和诊断信息
-4. **任务生成**：生成需要人工分析的任务清单
+**更新** 集群分析阶段现在包含以下重大改进：
+
+1. **深分析和浅分析集群分离**：
+   - 使用`maxDeepClusters`参数控制深分析集群数量（默认30）
+   - 通过`needsDeepAnalysis`字段区分深分析和浅分析集群
+   - 深分析集群：需要详细的人工分析
+   - 浅分析集群：使用简化上下文进行快速分析
+
+2. **批处理执行机制**：
+   - 使用`clusterContextBatchSize`参数控制批处理大小（默认10）
+   - 支持大规模集群的高效处理
+   - 深分析集群按批次处理，浅分析集群使用轻量级stub
+
+3. **优化处理大量浅集群**：
+   - 浅分析集群使用`collect_stub()`方法快速生成上下文
+   - 深分析集群使用完整上下文收集
+   - 支持数千个浅集群的快速处理
+
+4. **变更聚类构建**：
+   - 将相关的变更组织成逻辑集群
+   - 支持全局变更、页面变更和模块变更的分类
+   - 自动生成聚类标题和分析理由
+
+5. **上下文收集**：
+   - 为每个聚类收集相关文档和代码上下文
+   - 支持批量处理以提高性能
+   - 生成聚类分析任务清单
 
 #### 第五阶段：结果输出
 
@@ -201,49 +237,82 @@ FrontendImpactAnalysisEngine.run()方法是整个分析流程的核心，执行�
 **章节来源**
 - [scripts/front_end_impact_analyzer.py:56-160](file://scripts/front_end_impact_analyzer.py#L56-L160)
 
-### ImpactAnalyzer类详细分析
+### 集群分析器详细分析
 
-ImpactAnalyzer是影响分析的核心算法实现，负责将变更文件追踪到具体的页面组件。
+**更新** ChangeClusterBuilder类现在支持深分析和浅分析集群的智能分离：
 
-#### 核心算法：BFS路径追踪
+#### 分析桶分类机制
 
 ```mermaid
 flowchart TD
-Start([开始分析]) --> CheckFormat["检查是否为格式变更"]
-CheckFormat --> IsFormat{"格式变更?"}
-IsFormat --> |是| ReturnEmpty["返回空结果"]
+Start([开始分析]) --> NoiseCheck["检查噪声分类"]
+NoiseCheck --> IsNoise{"是否噪声?"}
+IsNoise --> |是| NoiseBucket["分配到噪声桶"]
+IsNoise --> |否| FormatCheck["检查格式变更"]
+FormatCheck --> IsFormat{"是否格式变更?"}
+IsFormat --> |是| FormatBucket["分配到格式桶"]
 IsFormat --> |否| FileType{"文件类型"}
-FileType --> IsPage{"页面文件?"}
-IsPage --> |是| DirectImpact["直接影响页面"]
-IsPage --> |否| ExtractSymbols["提取变更符号"]
-DirectImpact --> BuildPageImpact["构建页面直接影响"]
-ExtractSymbols --> TraceToPages["追踪到页面"]
-TraceToPages --> HasTrace{"找到路径?"}
-HasTrace --> |否| Unresolved["标记为未解决"]
-HasTrace --> |是| BuildImpacts["构建影响结果"]
-BuildPageImpact --> MergeSemantics["合并语义标签"]
-BuildImpacts --> MergeSemantics
-Unresolved --> MergeSemantics
-MergeSemantics --> CalcConfidence["计算置信度"]
-CalcConfidence --> CalcReason["生成影响原因"]
-CalcReason --> End([结束])
+FileType --> IsStyle{"样式文件?"}
+IsStyle --> |是| StyleBucket["分配到浅层样式桶"]
+IsStyle --> |否| IsDeep{"深分析文件类型?"}
+IsDeep --> |是| DeepBucket["分配到深分析桶"]
+IsDeep --> |否| ShallowBucket["分配到浅分析桶"]
 ```
 
 **图表来源**
-- [scripts/analyzer/impact_engine.py:26-58](file://scripts/analyzer/impact_engine.py#L26-L58)
-- [scripts/analyzer/impact_engine.py:77-105](file://scripts/analyzer/impact_engine.py#L77-L105)
+- [scripts/analyzer/cluster_builder.py:165-194](file://scripts/analyzer/cluster_builder.py#L165-L194)
 
-#### 符号匹配算法
+#### 深分析和浅分析集群分离
 
-符号匹配是影响分析的关键步骤，算法考虑以下因素：
+集群构建器现在支持两种分析策略：
 
-1. **导入绑定匹配**：检查导入声明中的符号绑定
-2. **重新导出匹配**：处理模块间的重新导出关系
-3. **严格符号模式**：在严格模式下精确匹配符号
-4. **通配符处理**：支持*和default导入的通配符匹配
+1. **深分析集群（Deep Analysis）**：
+   - 文件类型：页面、路由、API、存储、钩子、业务组件、共享组件
+   - 或者工具函数、配置模式且包含语义标签或API变更
+   - 需要详细的人工分析和完整上下文
+
+2. **浅分析集群（Shallow Analysis）**：
+   - 样式文件（除非与页面证据相关联）
+   - 工具函数、配置模式且无语义标签或API变更
+   - 使用简化上下文进行快速分析
+
+#### 批处理优化机制
+
+**更新** 集群上下文收集现在支持批处理优化：
+
+```mermaid
+sequenceDiagram
+participant Engine as 引擎
+participant Builder as ChangeClusterBuilder
+participant Collector as ClusterContextCollector
+Engine->>Builder : 构建变更聚类
+Builder-->>Engine : 返回深分析和浅分析集群
+Engine->>Collector : 批量收集深分析集群上下文
+loop 批次循环
+Collector->>Collector : 处理batch_size个集群
+Collector-->>Engine : 返回上下文数据
+end
+Engine->>Collector : 收集浅分析集群stub上下文
+Collector-->>Engine : 返回轻量级上下文
+```
+
+**图表来源**
+- [scripts/front_end_impact_analyzer.py:580-598](file://scripts/front_end_impact_analyzer.py#L580-L598)
+
+#### 配置参数详解
+
+**更新** 新增的配置参数：
+
+| 参数名 | 默认值 | 描述 |
+|--------|--------|------|
+| maxDeepClusters | 30 | 深分析集群的最大数量限制 |
+| clusterContextBatchSize | 10 | 集群上下文收集的批处理大小 |
+| maxFilesPerClusterContext | 8 | 每个聚类上下文的最大文件数 |
+| maxDocumentSnippetsPerCluster | 6 | 每个聚类的最大文档片段数 |
 
 **章节来源**
-- [scripts/analyzer/impact_engine.py:107-162](file://scripts/analyzer/impact_engine.py#L107-L162)
+- [scripts/analyzer/cluster_builder.py:92-141](file://scripts/analyzer/cluster_builder.py#L92-L141)
+- [scripts/analyzer/workflow.py:52-64](file://scripts/analyzer/workflow.py#L52-L64)
 
 ### 数据模型和状态管理
 
@@ -322,17 +391,27 @@ Scanner[ProjectScanner]
 Analyzer[ImpactAnalyzer]
 Models[Models]
 Common[Common Utilities]
+ClusterBuilder[ChangeClusterBuilder]
+ClusterTasks[ClusterTasks]
+ResultMerger[ClusterAnalysisMerger]
 end
 Engine --> DiffParser
 Engine --> Scanner
 Engine --> Analyzer
 Engine --> Models
 Engine --> Common
+Engine --> ClusterBuilder
+Engine --> ClusterTasks
+Engine --> ResultMerger
 Scanner --> TreeSitter
 Scanner --> TreeSitterTS
 DiffParser --> Models
 Analyzer --> Models
 Analyzer --> Common
+ClusterBuilder --> Models
+ClusterBuilder --> Common
+ClusterTasks --> ClusterBuilder
+ResultMerger --> ClusterAnalysisValidator
 ```
 
 **图表来源**
@@ -347,7 +426,8 @@ Analyzer --> Common
 2. **解析层**：GitDiffParser和各种分类器负责数据解析
 3. **扫描层**：ProjectScanner负责项目结构分析
 4. **分析层**：ImpactAnalyzer负责核心算法实现
-5. **工具层**：各种工具类提供通用功能支持
+5. **集群层**：ChangeClusterBuilder和ClusterContextCollector负责聚类分析
+6. **工具层**：各种工具类提供通用功能支持
 
 **章节来源**
 - [scripts/front_end_impact_analyzer.py:1-403](file://scripts/front_end_impact_analyzer.py#L1-L403)
@@ -360,6 +440,7 @@ Analyzer --> Common
 2. **项目扫描**：O(m×k)，其中m为源码文件数，k为平均文件复杂度
 3. **影响分析**：O(e×d)，其中e为边数，d为平均深度
 4. **聚类分析**：O(c×p)，其中c为聚类数，p为平均聚类大小
+5. **上下文收集**：O(b×c)，其中b为批处理大小，c为集群总数
 
 ### 内存优化策略
 
@@ -367,6 +448,14 @@ Analyzer --> Common
 2. **去重机制**：使用集合和字典确保唯一性
 3. **延迟计算**：只在需要时计算昂贵的操作
 4. **状态复用**：在不同阶段间共享计算结果
+5. **批处理优化**：通过批处理减少I/O操作和内存占用
+
+**更新** 新的性能优化特性：
+
+1. **深分析和浅分析分离**：减少不必要的完整上下文收集
+2. **批量上下文收集**：通过批处理减少文件I/O开销
+3. **浅分析stub优化**：对大量浅集群使用轻量级上下文
+4. **集群数量限制**：通过`maxDeepClusters`控制深分析负载
 
 ### 并行处理机会
 
@@ -374,6 +463,7 @@ Analyzer --> Common
 - AST分析的并行化
 - 路径追踪的并行化
 - 上下文收集的并行化
+- 集群分析的并行化
 
 ## 故障排除指南
 
@@ -383,6 +473,7 @@ Analyzer --> Common
 2. **语法错误**：源码存在语法错误导致AST解析失败
 3. **导入解析失败**：无法解析某些导入路径
 4. **内存不足**：大型项目可能导致内存溢出
+5. **集群过多**：深分析集群数量超过限制
 
 ### 错误恢复机制
 
@@ -392,6 +483,7 @@ Analyzer --> Common
 2. **渐进式处理**：即使部分失败也尽量返回可用结果
 3. **诊断信息**：记录详细的错误信息用于调试
 4. **状态回滚**：在异常情况下保持状态一致性
+5. **批处理容错**：单个集群的失败不影响其他集群的处理
 
 ### 调试技巧
 
@@ -399,6 +491,7 @@ Analyzer --> Common
 2. **启用详细日志**：通过ProcessRecorder查看详细执行过程
 3. **单元测试**：运行测试用例验证特定功能
 4. **配置调整**：根据项目特点调整分析参数
+5. **性能监控**：监控批处理执行进度和资源使用
 
 **章节来源**
 - [scripts/front_end_impact_analyzer.py:361-399](file://scripts/front_end_impact_analyzer.py#L361-L399)
@@ -412,6 +505,9 @@ FrontendImpactAnalysisEngine是一个设计精良的前端变更影响分析系�
 3. **健壮性**：完善的错误处理和恢复机制
 4. **可观测性**：详细的日志记录和状态跟踪
 5. **实用性**：提供可操作的分析结果和建议
+6. **高性能**：支持批处理和集群分离优化
+
+**更新** 引擎现已具备强大的集群分析能力，能够高效处理大规模变更，通过深分析和浅分析的分离以及批处理机制，显著提升了处理大量浅集群的效率。
 
 该引擎适用于React、React Router和Vite项目，能够有效帮助开发团队理解代码变更的影响范围，提高代码质量和发布安全性。
 
@@ -444,12 +540,16 @@ print(state.output)
 
 #### 高级配置
 
+**更新** 新增的配置选项：
+
 ```python
 # 自定义配置
 config = {
     "analysis": {
-        "maxClustersForDeepAnalysis": 50,
-        "maxFilesPerClusterContext": 10
+        "maxDeepClusters": 50,           # 增加深分析集群数量限制
+        "clusterContextBatchSize": 15,   # 增大批处理大小
+        "maxFilesPerClusterContext": 10, # 增加每个聚类的文件限制
+        "maxDocumentSnippetsPerCluster": 8 # 增加文档片段限制
     }
 }
 
@@ -467,6 +567,8 @@ engine = FrontendImpactAnalysisEngine(
 3. **监控资源使用**：关注内存和CPU使用情况
 4. **版本兼容性**：确保与项目使用的TypeScript版本兼容
 5. **测试覆盖**：为关键分析逻辑编写单元测试
+6. **批处理优化**：根据集群数量调整批处理大小
+7. **深浅分析平衡**：合理控制深分析集群的比例
 
 ### API参考
 
@@ -476,8 +578,21 @@ engine = FrontendImpactAnalysisEngine(
 - **异常**：抛出Exception并在状态中记录错误
 - **副作用**：写入运行产物文件
 
-#### 影响分析算法
+#### 集群分析算法
 
+**更新** 新增的集群分析参数：
+
+- **maxDeepClusters**：深分析集群的最大数量（默认30）
+- **clusterContextBatchSize**：批处理大小（默认10）
 - **时间复杂度**：O(V+E)，其中V为节点数，E为边数
 - **空间复杂度**：O(V+E)
 - **准确性**：基于AST分析，准确率高但可能有遗漏
+
+#### 集群分离策略
+
+**更新** 深分析和浅分析集群的分离策略：
+
+1. **深分析集群**：需要详细人工分析的变更
+2. **浅分析集群**：使用简化上下文的快速分析
+3. **批处理优化**：大量浅集群的高效处理
+4. **资源配置**：合理分配计算资源给不同类型集群

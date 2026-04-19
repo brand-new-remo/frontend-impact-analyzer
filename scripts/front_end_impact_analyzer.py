@@ -150,23 +150,15 @@ class FrontendImpactAnalysisEngine:
             routes=routes,
         )
         cluster_list = clusters.get("clusters", [])
-        deep_clusters = [c for c in cluster_list if c.get("needsDeepAnalysis")]
-        shallow_clusters = [c for c in cluster_list if not c.get("needsDeepAnalysis")]
         batch_size = int(self.config["analysis"].get("clusterContextBatchSize", 10))
-        total_deep = len(deep_clusters)
-        print(
-            f"[cluster] collecting context: {total_deep} deep + {len(shallow_clusters)} shallow "
-            f"(batch size {batch_size})...",
-            flush=True,
-        )
+        total = len(cluster_list)
+        print(f"[cluster] collecting context for {total} clusters (batch size {batch_size})...", flush=True)
         cluster_contexts = []
-        for batch_start in range(0, total_deep, batch_size):
-            batch_end = min(batch_start + batch_size, total_deep)
-            for cluster in deep_clusters[batch_start:batch_end]:
+        for batch_start in range(0, total, batch_size):
+            batch_end = min(batch_start + batch_size, total)
+            for cluster in cluster_list[batch_start:batch_end]:
                 cluster_contexts.append(context_collector.collect(cluster, diff_index))
-            print(f"[cluster]   {batch_end}/{total_deep} deep clusters processed", flush=True)
-        for cluster in shallow_clusters:
-            cluster_contexts.append(context_collector.collect_stub(cluster))
+            print(f"[cluster]   {batch_end}/{total} clusters processed", flush=True)
         coverage = cluster_builder.build_coverage(diff_index, clusters, diagnostics)
         cluster_tasks = build_cluster_task_markdown(clusters, coverage)
         self.state.workflow["diffIndex"] = diff_index
@@ -203,8 +195,6 @@ class FrontendImpactAnalysisEngine:
         write_json(run_dir / "05-change-clusters.json", state.workflow["changeClusters"])
         (run_dir / "06-cluster-analysis-tasks.md").write_text(state.workflow["clusterAnalysisTasks"], encoding="utf-8")
         for context in state.workflow["clusterContexts"]:
-            if context.get("shallow"):
-                continue  # skip writing individual files for shallow clusters
             write_json(run_dir / "cluster-context" / f"{context['clusterId']}.json", context)
         write_json(run_dir / "90-coverage-report.json", state.workflow["coverage"])
         # Use to_dict() instead of asdict() — avoids recursive deep-copy on
@@ -488,13 +478,98 @@ def run_phase_impact(args, project_root: Path, config: dict) -> None:
     log(f'[phase:impact] next: --phase cluster --run-dir "{run_dir}"')
 
 
-def run_phase_cluster(args, project_root: Path, config: dict) -> None:
-    """Phase 4: clustering, context collection, write final output."""
+def _run_cluster_merge(args, project_root: Path, config: dict, run_dir: Path, log) -> None:
+    """Merge all cluster-context batch files into the final output artifacts."""
     import time as _time
-    if not args.run_dir:
-        raise SystemExit("--run-dir is required for --phase cluster.")
+    t0 = _time.monotonic()
+
+    ctx = _load_cluster_prerequisites(args, project_root, config, log)
+    engine = ctx["engine"]
+    t1 = ctx["t1"]
+
+    # Load shared artifacts written by batch 1
+    clusters_path = run_dir / "05-change-clusters.json"
+    if not clusters_path.exists():
+        raise SystemExit(
+            f"05-change-clusters.json not found in {run_dir}.\n"
+            'Run --cluster-batch 1 first to generate shared artifacts.'
+        )
+    clusters = json.loads(clusters_path.read_text(encoding="utf-8"))
+    diff_index_path = run_dir / "03-diff-index.json"
+    diff_index = json.loads(diff_index_path.read_text(encoding="utf-8")) if diff_index_path.exists() else {}
+    seeds_path = run_dir / "04-file-impact-seeds.json"
+    seeds = json.loads(seeds_path.read_text(encoding="utf-8")) if seeds_path.exists() else []
+    doc_index_path = run_dir / "02-document-index.json"
+    document_index = json.loads(doc_index_path.read_text(encoding="utf-8")) if doc_index_path.exists() else {}
+    coverage_path = run_dir / "90-coverage-report.json"
+    coverage = json.loads(coverage_path.read_text(encoding="utf-8")) if coverage_path.exists() else {}
+    tasks_path = run_dir / "06-cluster-analysis-tasks.md"
+    cluster_tasks = tasks_path.read_text(encoding="utf-8") if tasks_path.exists() else ""
+
+    # Collect all cluster-context files
+    ctx_dir = run_dir / "cluster-context"
+    cluster_list = clusters.get("clusters", [])
+    cluster_contexts = []
+    missing = []
+    for cluster in cluster_list:
+        cid = cluster["clusterId"]
+        ctx_file = ctx_dir / f"{cid}.json"
+        if ctx_file.exists():
+            cluster_contexts.append(json.loads(ctx_file.read_text(encoding="utf-8")))
+        else:
+            missing.append(cid)
+
+    t2 = _time.monotonic()
+    log(f"[phase:cluster:merge] loaded {len(cluster_contexts)} context files, {len(missing)} missing ({t2 - t1:.1f}s)")
+    if missing:
+        log(f"[phase:cluster:merge] WARNING: missing context for: {', '.join(missing[:10])}{'...' if len(missing) > 10 else ''}")
+
+    # Populate engine state
+    engine.state.workflow["diffIndex"] = diff_index
+    engine.state.workflow["fileImpactSeeds"] = seeds
+    engine.state.workflow["documentIndex"] = document_index
+    engine.state.workflow["changeClusters"] = clusters
+    engine.state.workflow["clusterAnalysisTasks"] = cluster_tasks
+    engine.state.workflow["clusterContexts"] = cluster_contexts
+    engine.state.workflow["coverage"] = coverage
+
+    engine.state.output = engine._build_analysis_package(clusters, coverage, document_index)
+    engine.state.meta["analysisStatus"] = engine._analysis_status(
+        ctx["page_impacts"], ctx["unresolved"], ctx["diagnostics"],
+    )
+    engine.state.meta["statusSummary"] = {
+        "changedFileCount": len(ctx["changed_files"]),
+        "candidatePageTraceCount": len(ctx["page_impacts"]),
+        "pageImpactCount": len(ctx["page_impacts"]),
+        "caseCount": 0,
+        "unresolvedFileCount": len(ctx["unresolved"]),
+        "diagnosticCount": len(ctx["diagnostics"]),
+    }
+    engine.state.output["meta"]["analysisStatus"] = engine.state.meta["analysisStatus"]
+    engine.state.output["summary"]["statusSummary"] = engine.state.meta["statusSummary"]
+
+    log("[phase:cluster:merge] writing final artifacts...")
+    engine.write_run_artifacts(run_dir, engine.state)
+    if args.state_output:
+        write_json(Path(args.state_output), engine.state.to_dict())
+    if args.result_output:
+        write_json(Path(args.result_output), engine.state.output)
+    t3 = _time.monotonic()
+
+    append_phase_timing(run_dir, "cluster-merge", [
+        {"step": "load_checkpoints", "seconds": round(t1 - ctx["t0"], 2)},
+        {"step": "load_batch_contexts", "seconds": round(t2 - t1, 2)},
+        {"step": "write_artifacts", "seconds": round(t3 - t2, 2)},
+    ])
+
+    log(f"[phase:cluster:merge] done: {len(cluster_contexts)} contexts merged ({t3 - ctx['t0']:.1f}s)")
+    log(f"[phase:cluster:merge] result: {run_dir / '99-final-result.json'}")
+
+
+def _load_cluster_prerequisites(args, project_root: Path, config: dict, log):
+    """Shared checkpoint loading for cluster phase (batch and full modes)."""
+    import time as _time
     run_dir = Path(args.run_dir).resolve()
-    log = make_phase_logger(run_dir)
 
     t0 = _time.monotonic()
     log("[phase:cluster] loading checkpoints...")
@@ -559,11 +634,55 @@ def run_phase_cluster(args, project_root: Path, config: dict) -> None:
     engine.state.businessImpact["affectedPages"] = candidate_pages_list
     engine.state.businessImpact["affectedFunctions"] = structural_hints
 
-    # --- Build clusters ---
+    return {
+        "engine": engine,
+        "changed_files": changed_files,
+        "diff_text": diff_text,
+        "imports": imports,
+        "reverse_imports": reverse_imports,
+        "pages": pages,
+        "routes": routes,
+        "ast_facts": ast_facts,
+        "diagnostics": diagnostics,
+        "page_impacts": page_impacts,
+        "unresolved": unresolved,
+        "t0": t0,
+        "t1": t1,
+    }
+
+
+def run_phase_cluster(args, project_root: Path, config: dict) -> None:
+    """Phase 4: clustering, context collection, write final output.
+
+    Supports ``--cluster-batch N`` (1-based) to process only a slice of
+    clusters, and ``--cluster-batch merge`` to assemble all slices into the
+    final output.  Without ``--cluster-batch`` all clusters are processed in
+    a single invocation (original behaviour).
+    """
+    import time as _time
+    if not args.run_dir:
+        raise SystemExit("--run-dir is required for --phase cluster.")
+    run_dir = Path(args.run_dir).resolve()
+    log = make_phase_logger(run_dir)
+
+    batch_arg = getattr(args, "cluster_batch", None)
+
+    # ---- merge mode --------------------------------------------------------
+    if batch_arg and batch_arg.lower() == "merge":
+        _run_cluster_merge(args, project_root, config, run_dir, log)
+        return
+
+    # ---- shared setup: load checkpoints, build clusters & doc index --------
+    ctx = _load_cluster_prerequisites(args, project_root, config, log)
+    engine = ctx["engine"]
+    t0, t1 = ctx["t0"], ctx["t1"]
+
     log("[phase:cluster] building clusters...")
-    cluster_builder = ChangeClusterBuilder(diff_text)
-    diff_index = cluster_builder.build_diff_index(changed_files)
-    seeds = cluster_builder.build_file_impact_seeds(changed_files, page_impacts, unresolved)
+    cluster_builder = ChangeClusterBuilder(ctx["diff_text"])
+    diff_index = cluster_builder.build_diff_index(ctx["changed_files"])
+    seeds = cluster_builder.build_file_impact_seeds(
+        ctx["changed_files"], ctx["page_impacts"], ctx["unresolved"],
+    )
     clusters = cluster_builder.build_clusters(
         seeds,
         max_deep_clusters=int(config["analysis"].get("maxClustersForDeepAnalysis", 30)),
@@ -571,42 +690,89 @@ def run_phase_cluster(args, project_root: Path, config: dict) -> None:
     t2 = _time.monotonic()
     log(f"[phase:cluster] {len(clusters.get('clusters', []))} clusters built ({t2 - t1:.1f}s)")
 
-    # --- Document index ---
     log("[phase:cluster] building document index...")
     document_index = DocumentIndexer(project_root, config).build()
     t3 = _time.monotonic()
     log(f"[phase:cluster] document index built ({t3 - t2:.1f}s)")
 
-    # --- Context collection (batched, deep-only) ---
     cluster_list = clusters.get("clusters", [])
-    deep_clusters = [c for c in cluster_list if c.get("needsDeepAnalysis")]
-    shallow_clusters = [c for c in cluster_list if not c.get("needsDeepAnalysis")]
     batch_size = int(config["analysis"].get("clusterContextBatchSize", 10))
-    total_deep = len(deep_clusters)
-    log(
-        f"[phase:cluster] collecting context: {total_deep} deep + {len(shallow_clusters)} shallow "
-        f"(batch size {batch_size})..."
-    )
+    total = len(cluster_list)
+
+    # ---- batch mode: process only one slice --------------------------------
+    if batch_arg is not None:
+        try:
+            batch_num = int(batch_arg)
+        except ValueError:
+            raise SystemExit(f'--cluster-batch must be a positive integer or "merge", got: {batch_arg}')
+        if batch_num < 1:
+            raise SystemExit(f"--cluster-batch must be >= 1, got: {batch_num}")
+
+        total_batches = max(1, -(-total // batch_size))  # ceil division
+        if batch_num > total_batches:
+            log(f"[phase:cluster] batch {batch_num} > total batches {total_batches}, nothing to do")
+            return
+
+        slice_start = (batch_num - 1) * batch_size
+        slice_end = min(batch_num * batch_size, total)
+        batch_clusters = cluster_list[slice_start:slice_end]
+        log(f"[phase:cluster] batch {batch_num}/{total_batches}: clusters {slice_start+1}-{slice_end} of {total}")
+
+        context_collector = ClusterContextCollector(
+            project_root, config,
+            imports=ctx["imports"], reverse_imports=ctx["reverse_imports"],
+            ast_facts=ctx["ast_facts"], document_index=document_index, routes=ctx["routes"],
+        )
+        for i, cluster in enumerate(batch_clusters, 1):
+            ctx_data = context_collector.collect(cluster, diff_index)
+            write_json(run_dir / "cluster-context" / f"{ctx_data['clusterId']}.json", ctx_data)
+            log(f"[phase:cluster]   {i}/{len(batch_clusters)} written ({cluster['clusterId']})")
+        t4 = _time.monotonic()
+
+        # Write shared artifacts on batch 1 so merge has access
+        if batch_num == 1:
+            coverage = cluster_builder.build_coverage(diff_index, clusters, ctx["diagnostics"])
+            cluster_tasks = build_cluster_task_markdown(clusters, coverage)
+            write_json(run_dir / "02-document-index.json", DocumentIndexer.strip_cached_text(document_index))
+            write_json(run_dir / "03-diff-index.json", diff_index)
+            write_json(run_dir / "04-file-impact-seeds.json", seeds)
+            write_json(run_dir / "05-change-clusters.json", clusters)
+            (run_dir / "06-cluster-analysis-tasks.md").write_text(cluster_tasks, encoding="utf-8")
+            write_json(run_dir / "90-coverage-report.json", coverage)
+            log("[phase:cluster] shared artifacts written (batch 1)")
+
+        append_phase_timing(run_dir, f"cluster-batch-{batch_num}", [
+            {"step": "load_checkpoints", "seconds": round(t1 - t0, 2)},
+            {"step": "build_clusters", "seconds": round(t2 - t1, 2)},
+            {"step": "document_index", "seconds": round(t3 - t2, 2)},
+            {"step": f"collect_context_{slice_start+1}_to_{slice_end}", "seconds": round(t4 - t3, 2)},
+        ])
+
+        log(f"[phase:cluster] batch {batch_num} done ({t4 - t0:.1f}s)")
+        if batch_num < total_batches:
+            log(f'[phase:cluster] next: --phase cluster --cluster-batch {batch_num + 1} --run-dir "{run_dir}"')
+        else:
+            log(f'[phase:cluster] all batches done. finalize: --phase cluster --cluster-batch merge --run-dir "{run_dir}"')
+        return
+
+    # ---- full mode (no --cluster-batch): original behaviour ----------------
+    log(f"[phase:cluster] collecting context for {total} clusters (batch size {batch_size})...")
     context_collector = ClusterContextCollector(
         project_root, config,
-        imports=imports, reverse_imports=reverse_imports,
-        ast_facts=ast_facts, document_index=document_index, routes=routes,
+        imports=ctx["imports"], reverse_imports=ctx["reverse_imports"],
+        ast_facts=ctx["ast_facts"], document_index=document_index, routes=ctx["routes"],
     )
     cluster_contexts = []
-    # Full context for deep-analysis clusters only
-    for batch_start in range(0, total_deep, batch_size):
-        batch_end = min(batch_start + batch_size, total_deep)
-        for cluster in deep_clusters[batch_start:batch_end]:
+    for batch_start in range(0, total, batch_size):
+        batch_end = min(batch_start + batch_size, total)
+        for cluster in cluster_list[batch_start:batch_end]:
             cluster_contexts.append(context_collector.collect(cluster, diff_index))
         elapsed = _time.monotonic() - t3
-        log(f"[phase:cluster]   {batch_end}/{total_deep} deep clusters processed ({elapsed:.1f}s)")
-    # Lightweight stubs for shallow clusters (no file I/O)
-    for cluster in shallow_clusters:
-        cluster_contexts.append(context_collector.collect_stub(cluster))
+        log(f"[phase:cluster]   {batch_end}/{total} clusters processed ({elapsed:.1f}s)")
     t4 = _time.monotonic()
     log(f"[phase:cluster] context collected ({t4 - t3:.1f}s)")
 
-    coverage = cluster_builder.build_coverage(diff_index, clusters, diagnostics)
+    coverage = cluster_builder.build_coverage(diff_index, clusters, ctx["diagnostics"])
     cluster_tasks = build_cluster_task_markdown(clusters, coverage)
     engine.state.workflow["diffIndex"] = diff_index
     engine.state.workflow["fileImpactSeeds"] = seeds
@@ -616,16 +782,17 @@ def run_phase_cluster(args, project_root: Path, config: dict) -> None:
     engine.state.workflow["clusterContexts"] = cluster_contexts
     engine.state.workflow["coverage"] = coverage
 
-    # --- Build output ---
     engine.state.output = engine._build_analysis_package(clusters, coverage, document_index)
-    engine.state.meta["analysisStatus"] = engine._analysis_status(page_impacts, unresolved, diagnostics)
+    engine.state.meta["analysisStatus"] = engine._analysis_status(
+        ctx["page_impacts"], ctx["unresolved"], ctx["diagnostics"],
+    )
     engine.state.meta["statusSummary"] = {
-        "changedFileCount": len(changed_files),
-        "candidatePageTraceCount": len(page_impacts),
-        "pageImpactCount": len(page_impacts),
+        "changedFileCount": len(ctx["changed_files"]),
+        "candidatePageTraceCount": len(ctx["page_impacts"]),
+        "pageImpactCount": len(ctx["page_impacts"]),
         "caseCount": 0,
-        "unresolvedFileCount": len(unresolved),
-        "diagnosticCount": len(diagnostics),
+        "unresolvedFileCount": len(ctx["unresolved"]),
+        "diagnosticCount": len(ctx["diagnostics"]),
     }
     engine.state.output["meta"]["analysisStatus"] = engine.state.meta["analysisStatus"]
     engine.state.output["summary"]["statusSummary"] = engine.state.meta["statusSummary"]
@@ -647,7 +814,7 @@ def run_phase_cluster(args, project_root: Path, config: dict) -> None:
         {"step": "write_artifacts", "seconds": round(t5 - t4, 2)},
     ])
 
-    log(f"[phase:cluster] total: {len(page_impacts)} impacts, {len(cluster_list)} clusters ({t5 - t0:.1f}s)")
+    log(f"[phase:cluster] total: {len(ctx['page_impacts'])} impacts, {len(cluster_list)} clusters ({t5 - t0:.1f}s)")
     log(f"[phase:cluster] run artifacts written to: {run_dir}")
     log(f"[phase:cluster] result: {run_dir / '99-final-result.json'}")
 
@@ -680,6 +847,8 @@ def main():
     parser.add_argument("--merge-cluster-analysis", action="store_true")
     parser.add_argument("--phase", choices=["parse", "scan", "impact", "cluster", "analyze"],
                         help="Run a single analysis phase. Use --run-dir for scan/impact/cluster/analyze.")
+    parser.add_argument("--cluster-batch",
+                        help='Batch number (1-based) for cluster phase, or "merge" to assemble all batches.')
     parser.add_argument("--run-dir")
     parser.add_argument("--state-output")
     parser.add_argument("--result-output")
