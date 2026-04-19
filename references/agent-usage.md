@@ -25,15 +25,20 @@ The analyzer now produces an analysis package plus run artifacts:
 8. If required repo wiki / requirements / specs are missing, stop and ask the user to generate or provide them.
 9. Ask which base branch and compare branch to diff, unless the user already provided them.
 10. Ask whether configured diff ignores are acceptable and whether extra ignored folders are needed.
-11. Generate the diff with `--make-diff`. Always use `--make-diff` instead of manual `git diff` — only `--make-diff` applies the configured ignore rules from `impact-analyzer.config.json`.
-12. Run the analyzer.
-13. Read `<runDir>/99-final-result.json`.
-14. Read the run artifact directory from CLI output or `00-run-manifest.json`.
-15. Read `06-cluster-analysis-tasks.md`.
-16. For large diffs, use clusters as the primary workflow.
-17. Analyze prioritized clusters one at a time and write `cluster-analysis/*.analysis.json`.
-18. After writing cluster-analysis files, run merge and use the merged `cases` as the final cases.
-19. Read `validationReports` and fix generic or unsupported cases when needed.
+11. Generate the diff with `--make-diff`. This **only generates the diff file and stops** — it does not start analysis. Always use `--make-diff` instead of manual `git diff` — only `--make-diff` applies the configured ignore rules from `impact-analyzer.config.json`.
+12. Show the user the generated diff path and size stats. Ask whether the diff size is acceptable. If too large, suggest adjusting ignore rules in the config.
+13. Once the user confirms, run analysis with `--diff-file "<generated_diff_path>"`. For large projects where analysis is slow, split into three phases instead:
+    - `--diff-file "<path>" --phase parse` → writes `phase-01-parse.json` and prints the run dir
+    - `--phase scan --run-dir "<run_dir>"` → writes `phase-02-scan.json`
+    - `--phase analyze --run-dir "<run_dir>"` → writes all final artifacts
+    Each phase is an independent CLI call. If `--phase` is omitted, all phases run in one invocation.
+14. Read `<runDir>/99-final-result.json`.
+15. Read the run artifact directory from CLI output or `00-run-manifest.json`.
+16. Read `06-cluster-analysis-tasks.md`.
+17. For large diffs, use clusters as the primary workflow.
+18. Analyze prioritized clusters one at a time and write `cluster-analysis/*.analysis.json`.
+19. After writing cluster-analysis files, run merge and use the merged `cases` as the final cases.
+20. Read `validationReports` and fix generic or unsupported cases when needed.
 
 ## Cluster Workflow
 

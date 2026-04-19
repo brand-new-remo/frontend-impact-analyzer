@@ -26,16 +26,21 @@ The skill is designed for large PRs and release diffs. It should not ask the use
    - After installing agents, tell the user to restart the Claude Code session or use `/agents` so Claude Code loads the new project subagents.
    - If the user declines, skip this step and continue without subagents.
 4. Ask the user for base branch and compare branch if they were not provided.
-5. Generate the diff using `--make-diff`. The analyzer automatically applies all ignore rules from the config file (`diff.ignoreDirs`, `diff.ignoreFiles`, `diff.ignoreGlobs`) as git pathspec excludes, which can dramatically reduce diff size. Ask whether the user wants to add extra ignored folders beyond what the config already specifies. **Always use `--make-diff` instead of running `git diff` manually**, because only `--make-diff` applies the configured ignore rules.
-6. Parse and index the diff.
-7. Classify non-logic noise such as format-only, comment-only, import-only, generated, lockfile, test-only, and style-only changes.
-8. Scan source code, build import/reverse-import graph, bind pages and routes.
-9. Build file impact seeds.
-10. Group logic-like changed files into change clusters. Global/cross-cutting changes become separate global clusters instead of expanding to all pages.
-11. Build `cluster-context/*.json` evidence packs.
-12. Claude Code should analyze clusters one by one, using document candidates and original docs when needed.
-13. Claude Code should write `cluster-analysis/*.analysis.json` for analyzed clusters.
-14. Merge and validate the cluster conclusions into final QA cases and summary.
+5. Generate the diff using `--make-diff`. This command **only generates the diff file and stops** — it does not start analysis. The analyzer automatically applies all ignore rules from the config file (`diff.ignoreDirs`, `diff.ignoreFiles`, `diff.ignoreGlobs`) as git pathspec excludes, which can dramatically reduce diff size. Ask whether the user wants to add extra ignored folders beyond what the config already specifies. **Always use `--make-diff` instead of running `git diff` manually**, because only `--make-diff` applies the configured ignore rules.
+6. After `--make-diff` prints the generated diff path and size stats, **show the stats to the user** and ask them to confirm before proceeding. If the diff is unexpectedly large, suggest reviewing the config ignore rules.
+7. Once the user confirms the diff is acceptable, run analysis by passing the generated diff file path via `--diff-file`:
+   ```text
+   uv run --project "<skill_root>" python "<skill_root>/scripts/front_end_impact_analyzer.py" --project-root "<target_project_root>" --diff-file "<generated_diff_path>"
+   ```
+8. Parse and index the diff.
+9. Classify non-logic noise such as format-only, comment-only, import-only, generated, lockfile, test-only, and style-only changes.
+10. Scan source code, build import/reverse-import graph, bind pages and routes.
+11. Build file impact seeds.
+12. Group logic-like changed files into change clusters. Global/cross-cutting changes become separate global clusters instead of expanding to all pages.
+13. Build `cluster-context/*.json` evidence packs.
+14. Claude Code should analyze clusters one by one, using document candidates and original docs when needed.
+15. Claude Code should write `cluster-analysis/*.analysis.json` for analyzed clusters.
+16. Merge and validate the cluster conclusions into final QA cases and summary.
 
 ## Configuration
 
@@ -94,21 +99,38 @@ If required repo wiki is missing, tell the user to generate it with the repo-wik
 
 ## Invocation
 
-Generate a diff from branches and analyze it (recommended — applies config ignore rules automatically):
+Step 1 — Generate the diff (does NOT start analysis):
 
 ```text
 uv run --project "<skill_root>" python "<skill_root>/scripts/front_end_impact_analyzer.py" --project-root "<target_project_root>" --make-diff --base-branch "<base_branch>" --compare-branch "<compare_branch>"
 ```
 
-The `--make-diff` flag reads `diff.ignoreDirs`, `diff.ignoreFiles`, and `diff.ignoreGlobs` from `impact-analyzer.config.json` and passes them as `:(exclude)` pathspecs to `git diff`. This typically reduces diff size by 10-100x. The CLI will print the number of exclude pathspecs applied and the resulting diff size for verification.
+`--make-diff` reads `diff.ignoreDirs`, `diff.ignoreFiles`, and `diff.ignoreGlobs` from `impact-analyzer.config.json` and passes them as `:(exclude)` pathspecs to `git diff`. This typically reduces diff size by 10-100x. The CLI prints the number of exclude pathspecs applied, the resulting diff file path, line count, and size, then **stops**. Show the stats to the user and let them confirm before proceeding.
 
-Analyze an existing diff (config ignore rules are NOT applied — only use this if you already have a filtered diff):
+Step 2 — Run analysis with the generated diff:
 
 ```text
-uv run --project "<skill_root>" python "<skill_root>/scripts/front_end_impact_analyzer.py" --project-root "<target_project_root>" --diff-file "<diff_file>"
+uv run --project "<skill_root>" python "<skill_root>/scripts/front_end_impact_analyzer.py" --project-root "<target_project_root>" --diff-file "<generated_diff_path>"
 ```
 
 **Do not run `git diff` as a separate shell command and then pass the output to `--diff-file`.** This bypasses all configured ignore rules and produces an unnecessarily large diff.
+
+Step 2 (Alternative) — Run analysis in independent phases:
+
+For large projects where a single analysis run takes too long, split the analysis into three independent CLI invocations connected via `--run-dir`:
+
+```text
+# Phase 1: parse diff, classify files
+uv run --project "<skill_root>" python "<skill_root>/scripts/front_end_impact_analyzer.py" --project-root "<target_project_root>" --diff-file "<generated_diff_path>" --phase parse
+
+# Phase 2: scan project source files (requires --run-dir from phase 1 output)
+uv run --project "<skill_root>" python "<skill_root>/scripts/front_end_impact_analyzer.py" --project-root "<target_project_root>" --phase scan --run-dir "<run_dir>"
+
+# Phase 3: impact analysis, clustering, output (requires --run-dir)
+uv run --project "<skill_root>" python "<skill_root>/scripts/front_end_impact_analyzer.py" --project-root "<target_project_root>" --phase analyze --run-dir "<run_dir>"
+```
+
+Each phase writes a checkpoint file (`phase-01-parse.json`, `phase-02-scan.json`) into the run directory. Later phases validate that all prerequisite checkpoints exist before running. If `--phase` is omitted, the analyzer runs all phases in a single invocation (backward compatible).
 
 Optional arguments:
 
@@ -142,6 +164,8 @@ Each run writes an artifact directory under the configured output directory:
 <outputDir>/<runId>/
 ├── 00-run-manifest.json
 ├── 01-preflight-report.json
+├── phase-01-parse.json          (only when using --phase)
+├── phase-02-scan.json           (only when using --phase)
 ├── 02-document-index.json
 ├── 03-diff-index.json
 ├── 04-file-impact-seeds.json

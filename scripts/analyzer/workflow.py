@@ -411,3 +411,90 @@ def _ignore_pathspecs(config: Dict, extra_ignore_dirs: List[str]) -> List[str]:
     patterns.extend(str(item).strip() for item in config["diff"].get("ignoreFiles", []) if str(item).strip())
     patterns.extend(str(item).strip() for item in config["diff"].get("ignoreGlobs", []) if str(item).strip())
     return patterns
+
+
+# ---------------------------------------------------------------------------
+# Phase checkpoint helpers
+# ---------------------------------------------------------------------------
+
+_PHASE_FILES = {
+    "parse": "phase-01-parse.json",
+    "scan": "phase-02-scan.json",
+}
+
+_PHASE_PREREQUISITES = {
+    "scan": ["parse"],
+    "analyze": ["parse", "scan"],
+}
+
+
+def write_phase_json(path: Path, data: Dict) -> None:
+    """Write a phase checkpoint file with compact JSON (no indent)."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        json.dumps(data, ensure_ascii=False, separators=(",", ":")),
+        encoding="utf-8",
+    )
+
+
+def build_phase_checkpoint(phase_id: str, project_root: Path, **data) -> Dict:
+    """Build a phase checkpoint envelope."""
+    return {
+        "phaseId": phase_id,
+        "phaseVersion": 1,
+        "completedAt": time.strftime("%Y-%m-%dT%H:%M:%S"),
+        "projectRoot": normalize_path(str(project_root)),
+        **data,
+    }
+
+
+def load_phase_artifact(run_dir: Path, phase_id: str) -> Dict:
+    """Load and validate a phase checkpoint file."""
+    filename = _PHASE_FILES.get(phase_id)
+    if not filename:
+        raise SystemExit(f"Unknown phase id: {phase_id}")
+    path = run_dir / filename
+    if not path.exists():
+        raise SystemExit(
+            f"Phase '{phase_id}' checkpoint not found: {path}\n"
+            f"Run --phase {phase_id} first."
+        )
+    data = json.loads(path.read_text(encoding="utf-8"))
+    if data.get("phaseId") != phase_id:
+        raise SystemExit(
+            f"Phase checkpoint {path} has phaseId='{data.get('phaseId')}', "
+            f"expected '{phase_id}'."
+        )
+    return data
+
+
+def validate_phase_prerequisites(
+    run_dir: Path, phase: str, project_root: Path,
+) -> Dict[str, Dict]:
+    """Check that all prerequisite phases have completed and return their data."""
+    prereqs = _PHASE_PREREQUISITES.get(phase, [])
+    if not prereqs:
+        return {}
+    loaded: Dict[str, Dict] = {}
+    for req in prereqs:
+        loaded[req] = load_phase_artifact(run_dir, req)
+    # Stale data warning: check timestamps
+    if "parse" in loaded and "scan" in loaded:
+        parse_ts = loaded["parse"].get("completedAt", "")
+        scan_ts = loaded["scan"].get("completedAt", "")
+        if scan_ts and parse_ts and scan_ts < parse_ts:
+            print(
+                "[warning] phase-02-scan.json was created before phase-01-parse.json. "
+                "The scan results may be stale. Consider re-running --phase scan."
+            )
+    # Project root mismatch warning
+    for req, data in loaded.items():
+        stored_root = data.get("projectRoot", "")
+        current_root = normalize_path(str(project_root))
+        if stored_root and stored_root != current_root:
+            print(
+                f"[warning] --project-root ({current_root}) differs from "
+                f"phase '{req}' project root ({stored_root}). "
+                "Results may be inconsistent."
+            )
+    return loaded
