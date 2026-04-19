@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import time
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass, field, fields
 from typing import Any, Dict, List, Optional, TypedDict
 
 
@@ -158,6 +158,15 @@ class AnalysisState:
     })
     output: Any = field(default_factory=dict)
     processLogs: List[Dict] = field(default_factory=list)
+
+    def to_dict(self) -> Dict:
+        """Convert to dict without the deep-copy overhead of dataclasses.asdict().
+
+        All fields are plain dicts/lists (no nested dataclass instances),
+        so a shallow field-level copy is sufficient and orders of magnitude
+        faster than asdict() for large state objects.
+        """
+        return {f.name: getattr(self, f.name) for f in fields(self)}
 
 
 class ProcessRecorder:

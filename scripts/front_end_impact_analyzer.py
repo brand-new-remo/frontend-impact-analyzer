@@ -13,11 +13,12 @@ from analyzer.context_collector import ClusterContextCollector, DocumentIndexer
 from analyzer.diff_parser import GitDiffParser
 from analyzer.global_change_classifier import GlobalChangeClassifier
 from analyzer.impact_engine import ImpactAnalyzer
-from analyzer.models import AnalysisState, ChangedFile, ProcessRecorder, RouteInfo, StateStore
+from analyzer.models import AnalysisState, ChangedFile, PageImpact, ProcessRecorder, RouteInfo, StateStore
 from analyzer.project_scanner import ProjectScanner
 from analyzer.result_merger import ClusterAnalysisMerger
 from analyzer.source_classifier import SourceClassifier
 from analyzer.workflow import (
+    append_phase_timing,
     build_phase_checkpoint,
     build_run_manifest,
     doctor,
@@ -186,7 +187,15 @@ class FrontendImpactAnalysisEngine:
         for context in state.workflow["clusterContexts"]:
             write_json(run_dir / "cluster-context" / f"{context['clusterId']}.json", context)
         write_json(run_dir / "90-coverage-report.json", state.workflow["coverage"])
-        write_json(run_dir / "98-analysis-state.json", asdict(state))
+        # Use to_dict() instead of asdict() — avoids recursive deep-copy on
+        # the massive codeGraph/astFacts structure (orders of magnitude faster).
+        # Compact JSON (no indent) further cuts serialisation + I/O time.
+        state_path = run_dir / "98-analysis-state.json"
+        state_path.parent.mkdir(parents=True, exist_ok=True)
+        state_path.write_text(
+            json.dumps(state.to_dict(), ensure_ascii=False, separators=(",", ":")),
+            encoding="utf-8",
+        )
         write_json(run_dir / "99-final-result.json", state.output)
 
     def _analysis_status(self, page_impacts, unresolved, diagnostics):
@@ -258,10 +267,12 @@ class FrontendImpactAnalysisEngine:
 
 def run_phase_parse(args, project_root: Path, config: dict) -> None:
     """Phase 1: parse diff, classify changed files, write checkpoint."""
+    import time as _time
     diff_file = Path(args.diff_file).resolve() if args.diff_file else None
     if diff_file is None:
         raise SystemExit("--diff-file is required for --phase parse.")
 
+    t0 = _time.monotonic()
     diff_text = diff_file.read_text(encoding="utf-8", errors="ignore")
     requirement_text = (
         Path(args.requirement_file).read_text(encoding="utf-8", errors="ignore")
@@ -271,6 +282,8 @@ def run_phase_parse(args, project_root: Path, config: dict) -> None:
     manifest = build_run_manifest(project_root, config, args.base_branch, args.compare_branch, diff_file)
     run_dir = ensure_run_dir(manifest)
     preflight_report = preflight(project_root, config)
+    t1 = _time.monotonic()
+    print(f"[phase:parse] preflight done ({t1 - t0:.1f}s)", flush=True)
 
     if preflight_report.get("status") == "blocked":
         write_json(run_dir / "00-run-manifest.json", manifest)
@@ -287,6 +300,8 @@ def run_phase_parse(args, project_root: Path, config: dict) -> None:
         cf.file_type = classifier.classify(cf.path)
         cf.module_guess = classifier.guess_module(cf.path)
         cf.global_classification = global_classifier.classify(cf.path, cf.file_type, cf.semantic_tags)
+    t2 = _time.monotonic()
+    print(f"[phase:parse] diff parsed & classified ({t2 - t1:.1f}s)", flush=True)
 
     write_json(run_dir / "00-run-manifest.json", manifest)
     write_json(run_dir / "01-preflight-report.json", preflight_report)
@@ -299,28 +314,42 @@ def run_phase_parse(args, project_root: Path, config: dict) -> None:
         diffFile=str(diff_file),
     )
     write_phase_json(run_dir / "phase-01-parse.json", checkpoint)
+    t3 = _time.monotonic()
 
-    print(f"[phase:parse] parsed {len(changed_files)} changed files, {len(commit_types)} commit types")
+    append_phase_timing(run_dir, "parse", [
+        {"step": "preflight", "seconds": round(t1 - t0, 2)},
+        {"step": "parse_and_classify", "seconds": round(t2 - t1, 2)},
+        {"step": "write_checkpoint", "seconds": round(t3 - t2, 2)},
+    ])
+
+    print(f"[phase:parse] parsed {len(changed_files)} changed files, {len(commit_types)} commit types ({t3 - t0:.1f}s)")
     print(f"[phase:parse] run dir: {run_dir}")
     print(f'[phase:parse] next: --phase scan --run-dir "{run_dir}"')
 
 
 def run_phase_scan(args, project_root: Path, config: dict) -> None:
     """Phase 2: scan project source files, write checkpoint."""
+    import time as _time
     if not args.run_dir:
         raise SystemExit("--run-dir is required for --phase scan.")
     run_dir = Path(args.run_dir).resolve()
 
+    t0 = _time.monotonic()
     prior = validate_phase_prerequisites(run_dir, "scan", project_root)
     parse_data = prior["parse"]
 
     changed_file_paths = [cf["path"] for cf in parse_data["changedFiles"]]
+    t1 = _time.monotonic()
+    print(f"[phase:scan] prerequisites loaded ({t1 - t0:.1f}s)", flush=True)
 
+    print("[phase:scan] scanning project...", flush=True)
     scanner = ProjectScanner(project_root)
     (imports, reverse_imports, pages, routes,
      ast_facts, aliases, barrel_files, barrel_evidence, diagnostics) = scanner.scan(
         changed_file_paths=changed_file_paths,
     )
+    t2 = _time.monotonic()
+    print(f"[phase:scan] scan complete ({t2 - t1:.1f}s)", flush=True)
 
     checkpoint = build_phase_checkpoint(
         "scan", project_root,
@@ -335,65 +364,43 @@ def run_phase_scan(args, project_root: Path, config: dict) -> None:
         diagnostics=diagnostics,
     )
     write_phase_json(run_dir / "phase-02-scan.json", checkpoint)
+    t3 = _time.monotonic()
 
-    print(f"[phase:scan] scanned {len(imports)} files, {len(pages)} pages, {len(routes)} routes")
+    append_phase_timing(run_dir, "scan", [
+        {"step": "load_prerequisites", "seconds": round(t1 - t0, 2)},
+        {"step": "project_scan", "seconds": round(t2 - t1, 2)},
+        {"step": "write_checkpoint", "seconds": round(t3 - t2, 2)},
+    ])
+
+    print(f"[phase:scan] scanned {len(imports)} files, {len(pages)} pages, {len(routes)} routes ({t3 - t0:.1f}s)")
     print(f"[phase:scan] run dir: {run_dir}")
-    print(f'[phase:scan] next: --phase analyze --run-dir "{run_dir}"')
+    print(f'[phase:scan] next: --phase impact --run-dir "{run_dir}"')
 
 
-def run_phase_analyze(args, project_root: Path, config: dict) -> None:
-    """Phase 3: impact analysis, clustering, output."""
+def run_phase_impact(args, project_root: Path, config: dict) -> None:
+    """Phase 3: trace changed files → page impacts, write checkpoint."""
+    import time as _time
     if not args.run_dir:
-        raise SystemExit("--run-dir is required for --phase analyze.")
+        raise SystemExit("--run-dir is required for --phase impact.")
     run_dir = Path(args.run_dir).resolve()
 
-    prior = validate_phase_prerequisites(run_dir, "analyze", project_root)
+    t0 = _time.monotonic()
+    print("[phase:impact] loading checkpoints...", flush=True)
+    prior = validate_phase_prerequisites(run_dir, "impact", project_root)
     parse_data = prior["parse"]
     scan_data = prior["scan"]
 
-    # Reconstruct objects from checkpoints
     changed_files = [ChangedFile(**d) for d in parse_data["changedFiles"]]
-    commit_types = parse_data["commitTypes"]
-    requirement_text = parse_data.get("requirementText", "")
-
-    # Re-read diff text (needed by cluster builder)
-    diff_file_path = parse_data.get("diffFile", "")
-    diff_text = ""
-    if diff_file_path and Path(diff_file_path).exists():
-        diff_text = Path(diff_file_path).read_text(encoding="utf-8", errors="ignore")
-
     imports = scan_data["imports"]
     reverse_imports = scan_data["reverseImports"]
     pages = scan_data["pages"]
     routes = [RouteInfo(**d) for d in scan_data["routes"]]
     ast_facts = scan_data.get("astFacts", {})
-    aliases = scan_data.get("aliases", {})
-    barrel_files = scan_data.get("barrelFiles", [])
-    barrel_evidence = scan_data.get("barrelEvidence", {})
     diagnostics = scan_data.get("diagnostics", [])
+    t1 = _time.monotonic()
+    print(f"[phase:impact] checkpoints loaded ({t1 - t0:.1f}s)", flush=True)
 
-    # Load manifest / preflight written by parse phase
-    manifest_file = run_dir / "00-run-manifest.json"
-    manifest = json.loads(manifest_file.read_text(encoding="utf-8")) if manifest_file.exists() else {}
-    preflight_file = run_dir / "01-preflight-report.json"
-    preflight_report = json.loads(preflight_file.read_text(encoding="utf-8")) if preflight_file.exists() else {}
-
-    # Create engine and pre-populate state from checkpoints
-    engine = FrontendImpactAnalysisEngine(
-        project_root, diff_text, requirement_text,
-        config=config, manifest=manifest, preflight_report=preflight_report,
-    )
-    engine.store.set_diff(commit_types, changed_files)
-    engine.store.set_file_classifications(changed_files)
-    engine.store.set_graph(
-        imports, reverse_imports, pages, routes,
-        ast_facts, aliases, barrel_files, barrel_evidence, diagnostics,
-    )
-    engine.recorder.log("phase_parse", "done", f"loaded {len(changed_files)} changed files from checkpoint")
-    engine.recorder.log("phase_scan", "done", f"loaded {len(imports)} imports, {len(pages)} pages, {len(routes)} routes from checkpoint")
-
-    # --- Impact analysis ---
-    engine.recorder.log("impact_analysis", "running", "start tracing changed files to pages")
+    print(f"[phase:impact] tracing {len(changed_files)} changed files...", flush=True)
     analyzer = ImpactAnalyzer(
         imports=imports, reverse_imports=reverse_imports,
         pages=pages, routes=routes, ast_facts=ast_facts,
@@ -410,11 +417,7 @@ def run_phase_analyze(args, project_root: Path, config: dict) -> None:
         if unresolved_item:
             unresolved.append(unresolved_item)
 
-    candidate_page_traces = [asdict(x) for x in page_impacts]
-    engine.state.codeImpact["candidatePageTraces"] = candidate_page_traces
-    engine.state.codeImpact["pageImpacts"] = candidate_page_traces
-    engine.state.codeImpact["unresolvedFiles"] = unresolved
-    engine.state.codeImpact["sharedRisks"] = [
+    shared_risks = [
         {
             "file": cf.path,
             "risk": "shared component change may affect multiple pages but should be validated based on actual trace and semantics",
@@ -423,11 +426,98 @@ def run_phase_analyze(args, project_root: Path, config: dict) -> None:
         for cf in changed_files
         if cf.file_type == "shared-component" and cf.noise_classification.get("shouldAnalyze", True)
     ]
-    engine.recorder.log("impact_analysis", "done", f"generated {len(page_impacts)} page impacts")
-
     candidate_modules = uniq_keep_order([x.module_name for x in page_impacts if x.module_name])
     candidate_pages_list = uniq_keep_order([x.page_file for x in page_impacts if x.page_file])
     structural_hints = uniq_keep_order([tag for x in page_impacts for tag in x.semantic_tags])
+    t2 = _time.monotonic()
+    print(f"[phase:impact] traced {len(page_impacts)} page impacts, {len(unresolved)} unresolved ({t2 - t1:.1f}s)", flush=True)
+
+    checkpoint = build_phase_checkpoint(
+        "impact", project_root,
+        pageImpacts=[asdict(x) for x in page_impacts],
+        unresolved=unresolved,
+        sharedRisks=shared_risks,
+        candidateModules=candidate_modules,
+        candidatePages=candidate_pages_list,
+        structuralHints=structural_hints,
+        diagnosticCount=len(diagnostics),
+    )
+    write_phase_json(run_dir / "phase-03-impact.json", checkpoint)
+    t3 = _time.monotonic()
+
+    append_phase_timing(run_dir, "impact", [
+        {"step": "load_checkpoints", "seconds": round(t1 - t0, 2)},
+        {"step": "trace_impacts", "seconds": round(t2 - t1, 2)},
+        {"step": "write_checkpoint", "seconds": round(t3 - t2, 2)},
+    ])
+
+    print(f"[phase:impact] run dir: {run_dir}")
+    print(f'[phase:impact] next: --phase cluster --run-dir "{run_dir}"')
+
+
+def run_phase_cluster(args, project_root: Path, config: dict) -> None:
+    """Phase 4: clustering, context collection, write final output."""
+    import time as _time
+    if not args.run_dir:
+        raise SystemExit("--run-dir is required for --phase cluster.")
+    run_dir = Path(args.run_dir).resolve()
+
+    t0 = _time.monotonic()
+    print("[phase:cluster] loading checkpoints...", flush=True)
+    prior = validate_phase_prerequisites(run_dir, "cluster", project_root)
+    parse_data = prior["parse"]
+    scan_data = prior["scan"]
+    impact_data = prior["impact"]
+
+    changed_files = [ChangedFile(**d) for d in parse_data["changedFiles"]]
+    commit_types = parse_data["commitTypes"]
+    requirement_text = parse_data.get("requirementText", "")
+
+    diff_file_path = parse_data.get("diffFile", "")
+    diff_text = ""
+    if diff_file_path and Path(diff_file_path).exists():
+        diff_text = Path(diff_file_path).read_text(encoding="utf-8", errors="ignore")
+
+    imports = scan_data["imports"]
+    reverse_imports = scan_data["reverseImports"]
+    pages = scan_data["pages"]
+    routes = [RouteInfo(**d) for d in scan_data["routes"]]
+    ast_facts = scan_data.get("astFacts", {})
+    aliases = scan_data.get("aliases", {})
+    barrel_files = scan_data.get("barrelFiles", [])
+    barrel_evidence = scan_data.get("barrelEvidence", {})
+    diagnostics = scan_data.get("diagnostics", [])
+
+    page_impacts = [PageImpact(**d) for d in impact_data["pageImpacts"]]
+    unresolved = impact_data["unresolved"]
+    shared_risks = impact_data["sharedRisks"]
+    candidate_modules = impact_data["candidateModules"]
+    candidate_pages_list = impact_data["candidatePages"]
+    structural_hints = impact_data["structuralHints"]
+
+    manifest_file = run_dir / "00-run-manifest.json"
+    manifest = json.loads(manifest_file.read_text(encoding="utf-8")) if manifest_file.exists() else {}
+    preflight_file = run_dir / "01-preflight-report.json"
+    preflight_report = json.loads(preflight_file.read_text(encoding="utf-8")) if preflight_file.exists() else {}
+    t1 = _time.monotonic()
+    print(f"[phase:cluster] checkpoints loaded ({t1 - t0:.1f}s)", flush=True)
+
+    # Create engine and pre-populate state from checkpoints
+    engine = FrontendImpactAnalysisEngine(
+        project_root, diff_text, requirement_text,
+        config=config, manifest=manifest, preflight_report=preflight_report,
+    )
+    engine.store.set_diff(commit_types, changed_files)
+    engine.store.set_file_classifications(changed_files)
+    engine.store.set_graph(
+        imports, reverse_imports, pages, routes,
+        ast_facts, aliases, barrel_files, barrel_evidence, diagnostics,
+    )
+    candidate_page_traces = [asdict(x) for x in page_impacts]
+    engine.state.codeImpact["candidatePageTraces"] = candidate_page_traces
+    engine.state.codeImpact["pageImpacts"] = candidate_page_traces
+    engine.state.codeImpact["unresolvedFiles"] = unresolved
+    engine.state.codeImpact["sharedRisks"] = shared_risks
     engine.state.candidateImpact["candidateModules"] = candidate_modules
     engine.state.candidateImpact["candidatePages"] = candidate_pages_list
     engine.state.candidateImpact["structuralHints"] = structural_hints
@@ -435,8 +525,8 @@ def run_phase_analyze(args, project_root: Path, config: dict) -> None:
     engine.state.businessImpact["affectedPages"] = candidate_pages_list
     engine.state.businessImpact["affectedFunctions"] = structural_hints
 
-    # --- Build intermediates ---
-    engine.recorder.log("build_intermediates", "running", "start building diff index and change clusters")
+    # --- Build clusters ---
+    print("[phase:cluster] building clusters...", flush=True)
     cluster_builder = ChangeClusterBuilder(diff_text)
     diff_index = cluster_builder.build_diff_index(changed_files)
     seeds = cluster_builder.build_file_impact_seeds(changed_files, page_impacts, unresolved)
@@ -444,13 +534,27 @@ def run_phase_analyze(args, project_root: Path, config: dict) -> None:
         seeds,
         max_deep_clusters=int(config["analysis"].get("maxClustersForDeepAnalysis", 30)),
     )
+    t2 = _time.monotonic()
+    print(f"[phase:cluster] {len(clusters.get('clusters', []))} clusters built ({t2 - t1:.1f}s)", flush=True)
+
+    # --- Document index ---
+    print("[phase:cluster] building document index...", flush=True)
     document_index = DocumentIndexer(project_root, config).build()
+    t3 = _time.monotonic()
+    print(f"[phase:cluster] document index built ({t3 - t2:.1f}s)", flush=True)
+
+    # --- Context collection ---
+    cluster_list = clusters.get("clusters", [])
+    print(f"[phase:cluster] collecting context for {len(cluster_list)} clusters...", flush=True)
     context_collector = ClusterContextCollector(
         project_root, config,
         imports=imports, reverse_imports=reverse_imports,
         ast_facts=ast_facts, document_index=document_index, routes=routes,
     )
-    cluster_contexts = [context_collector.collect(cluster, diff_index) for cluster in clusters.get("clusters", [])]
+    cluster_contexts = [context_collector.collect(cluster, diff_index) for cluster in cluster_list]
+    t4 = _time.monotonic()
+    print(f"[phase:cluster] context collected ({t4 - t3:.1f}s)", flush=True)
+
     coverage = cluster_builder.build_coverage(diff_index, clusters, diagnostics)
     cluster_tasks = build_cluster_task_markdown(clusters, coverage)
     engine.state.workflow["diffIndex"] = diff_index
@@ -460,9 +564,6 @@ def run_phase_analyze(args, project_root: Path, config: dict) -> None:
     engine.state.workflow["clusterAnalysisTasks"] = cluster_tasks
     engine.state.workflow["clusterContexts"] = cluster_contexts
     engine.state.workflow["coverage"] = coverage
-    engine.recorder.log("build_intermediates", "done", f"generated {len(clusters.get('clusters', []))} change clusters")
-
-    engine.recorder.log("build_cases", "skipped", "cases require Claude cluster-analysis; no template cases generated")
 
     # --- Build output ---
     engine.state.output = engine._build_analysis_package(clusters, coverage, document_index)
@@ -478,15 +579,34 @@ def run_phase_analyze(args, project_root: Path, config: dict) -> None:
     engine.state.output["meta"]["analysisStatus"] = engine.state.meta["analysisStatus"]
     engine.state.output["summary"]["statusSummary"] = engine.state.meta["statusSummary"]
 
+    print("[phase:cluster] writing artifacts...", flush=True)
     engine.write_run_artifacts(run_dir, engine.state)
     if args.state_output:
-        write_json(Path(args.state_output), asdict(engine.state))
+        write_json(Path(args.state_output), engine.state.to_dict())
     if args.result_output:
         write_json(Path(args.result_output), engine.state.output)
+    t5 = _time.monotonic()
+    print(f"[phase:cluster] artifacts written ({t5 - t4:.1f}s)", flush=True)
 
-    print(f"[phase:analyze] generated {len(page_impacts)} page impacts, {len(clusters.get('clusters', []))} clusters")
-    print(f"[phase:analyze] run artifacts written to: {run_dir}")
-    print(f"[phase:analyze] result: {run_dir / '99-final-result.json'}")
+    append_phase_timing(run_dir, "cluster", [
+        {"step": "load_checkpoints", "seconds": round(t1 - t0, 2)},
+        {"step": "build_clusters", "seconds": round(t2 - t1, 2)},
+        {"step": "document_index", "seconds": round(t3 - t2, 2)},
+        {"step": "collect_context", "seconds": round(t4 - t3, 2)},
+        {"step": "write_artifacts", "seconds": round(t5 - t4, 2)},
+    ])
+
+    print(f"[phase:cluster] total: {len(page_impacts)} impacts, {len(cluster_list)} clusters ({t5 - t0:.1f}s)")
+    print(f"[phase:cluster] run artifacts written to: {run_dir}")
+    print(f"[phase:cluster] result: {run_dir / '99-final-result.json'}")
+
+
+def run_phase_analyze(args, project_root: Path, config: dict) -> None:
+    """Backward-compatible: runs impact + cluster phases sequentially."""
+    if not args.run_dir:
+        raise SystemExit("--run-dir is required for --phase analyze.")
+    run_phase_impact(args, project_root, config)
+    run_phase_cluster(args, project_root, config)
 
 
 def main():
@@ -507,8 +627,8 @@ def main():
     parser.add_argument("--install-claude-agents", action="store_true")
     parser.add_argument("--overwrite-claude-agents", action="store_true")
     parser.add_argument("--merge-cluster-analysis", action="store_true")
-    parser.add_argument("--phase", choices=["parse", "scan", "analyze"],
-                        help="Run a single analysis phase. Use --run-dir for scan/analyze.")
+    parser.add_argument("--phase", choices=["parse", "scan", "impact", "cluster", "analyze"],
+                        help="Run a single analysis phase. Use --run-dir for scan/impact/cluster/analyze.")
     parser.add_argument("--run-dir")
     parser.add_argument("--state-output")
     parser.add_argument("--result-output")
@@ -577,6 +697,10 @@ def main():
             run_phase_parse(args, project_root, config)
         elif args.phase == "scan":
             run_phase_scan(args, project_root, config)
+        elif args.phase == "impact":
+            run_phase_impact(args, project_root, config)
+        elif args.phase == "cluster":
+            run_phase_cluster(args, project_root, config)
         elif args.phase == "analyze":
             run_phase_analyze(args, project_root, config)
         return
@@ -697,14 +821,14 @@ def main():
             }
             state.output = failed_result
             write_json(run_dir / "00-run-manifest.json", manifest)
-            write_json(run_dir / "98-analysis-state.json", asdict(state))
+            write_json(run_dir / "98-analysis-state.json", state.to_dict())
             write_json(run_dir / "99-final-result.json", failed_result)
         except Exception as write_exc:
             print(f"[error] Failed to write error state: {write_exc}", flush=True)
         exit_code = 1
 
     if args.state_output:
-        write_json(Path(args.state_output), asdict(state))
+        write_json(Path(args.state_output), state.to_dict())
     if args.result_output:
         write_json(Path(args.result_output), state.output)
     print(f"run artifacts written to: {run_dir}")

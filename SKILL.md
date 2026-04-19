@@ -119,20 +119,25 @@ uv run --project "<skill_root>" python "<skill_root>/scripts/front_end_impact_an
 
 Step 2 (Alternative) — Run analysis in independent phases:
 
-For large projects where a single analysis run takes too long, split the analysis into three independent CLI invocations connected via `--run-dir`:
+For large projects where a single analysis run takes too long, split the analysis into four independent CLI invocations connected via `--run-dir`. When the diff exceeds `analysis.phasedExecutionThreshold` (default 1000 lines), the analyzer automatically runs parse and prints instructions for the remaining phases.
 
 ```text
-# Phase 1: parse diff, classify files
+# Phase 1 — parse: parse diff, classify files
 uv run --project "<skill_root>" python "<skill_root>/scripts/front_end_impact_analyzer.py" --project-root "<target_project_root>" --diff-file "<generated_diff_path>" --phase parse
 
-# Phase 2: scan project source files (requires --run-dir from phase 1 output)
+# Phase 2 — scan: scan project source files
 uv run --project "<skill_root>" python "<skill_root>/scripts/front_end_impact_analyzer.py" --project-root "<target_project_root>" --phase scan --run-dir "<run_dir>"
 
-# Phase 3: impact analysis, clustering, output (requires --run-dir)
-uv run --project "<skill_root>" python "<skill_root>/scripts/front_end_impact_analyzer.py" --project-root "<target_project_root>" --phase analyze --run-dir "<run_dir>"
+# Phase 3 — impact: trace changed files to pages
+uv run --project "<skill_root>" python "<skill_root>/scripts/front_end_impact_analyzer.py" --project-root "<target_project_root>" --phase impact --run-dir "<run_dir>"
+
+# Phase 4 — cluster: build clusters, collect context, write final output
+uv run --project "<skill_root>" python "<skill_root>/scripts/front_end_impact_analyzer.py" --project-root "<target_project_root>" --phase cluster --run-dir "<run_dir>"
 ```
 
-Each phase writes a checkpoint file (`phase-01-parse.json`, `phase-02-scan.json`) into the run directory. Later phases validate that all prerequisite checkpoints exist before running. If `--phase` is omitted, the analyzer runs all phases in a single invocation (backward compatible).
+Each phase writes a checkpoint file (`phase-01-parse.json`, `phase-02-scan.json`, `phase-03-impact.json`) into the run directory. Later phases validate that all prerequisite checkpoints exist before running. Each phase prints timing information and the exact command for the next phase.
+
+`--phase analyze` is still supported as a shortcut that runs impact + cluster sequentially in one invocation. If `--phase` is omitted and the diff is below the threshold, all phases run in a single invocation.
 
 Optional arguments:
 
@@ -168,6 +173,7 @@ Each run writes an artifact directory under the configured output directory:
 ├── 01-preflight-report.json
 ├── phase-01-parse.json          (only when using --phase)
 ├── phase-02-scan.json           (only when using --phase)
+├── phase-03-impact.json         (only when using --phase)
 ├── 02-document-index.json
 ├── 03-diff-index.json
 ├── 04-file-impact-seeds.json

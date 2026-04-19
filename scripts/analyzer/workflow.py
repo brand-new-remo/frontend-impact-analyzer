@@ -421,10 +421,13 @@ def _ignore_pathspecs(config: Dict, extra_ignore_dirs: List[str]) -> List[str]:
 _PHASE_FILES = {
     "parse": "phase-01-parse.json",
     "scan": "phase-02-scan.json",
+    "impact": "phase-03-impact.json",
 }
 
 _PHASE_PREREQUISITES = {
     "scan": ["parse"],
+    "impact": ["parse", "scan"],
+    "cluster": ["parse", "scan", "impact"],
     "analyze": ["parse", "scan"],
 }
 
@@ -499,3 +502,21 @@ def validate_phase_prerequisites(
                 "Results may be inconsistent."
             )
     return loaded
+
+
+def append_phase_timing(run_dir: Path, phase: str, steps: List[Dict]) -> None:
+    """Append one phase's timing data to phase-timings.json in the run dir."""
+    path = run_dir / "phase-timings.json"
+    data: List = []
+    if path.exists():
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+        except (json.JSONDecodeError, OSError):
+            data = []
+    data.append({
+        "phase": phase,
+        "completedAt": time.strftime("%Y-%m-%dT%H:%M:%S"),
+        "totalSeconds": round(sum(s["seconds"] for s in steps), 2),
+        "steps": steps,
+    })
+    path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
