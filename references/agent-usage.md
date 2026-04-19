@@ -27,11 +27,10 @@ The analyzer now produces an analysis package plus run artifacts:
 10. Ask whether configured diff ignores are acceptable and whether extra ignored folders are needed.
 11. Generate the diff with `--make-diff`. This **only generates the diff file and stops** — it does not start analysis. Always use `--make-diff` instead of manual `git diff` — only `--make-diff` applies the configured ignore rules from `impact-analyzer.config.json`.
 12. Show the user the generated diff path and size stats. Ask whether the diff size is acceptable. If too large, suggest adjusting ignore rules in the config.
-13. Once the user confirms, run analysis with `--diff-file "<generated_diff_path>"`. For large projects where analysis is slow, split into three phases instead:
-    - `--diff-file "<path>" --phase parse` → writes `phase-01-parse.json` and prints the run dir
+13. Once the user confirms, run analysis with `--diff-file "<generated_diff_path>"`. If the diff exceeds `analysis.phasedExecutionThreshold` (default 1000 lines), the analyzer **automatically** runs only the parse phase and prints the run dir. Follow the output to continue:
     - `--phase scan --run-dir "<run_dir>"` → writes `phase-02-scan.json`
     - `--phase analyze --run-dir "<run_dir>"` → writes all final artifacts
-    Each phase is an independent CLI call. If `--phase` is omitted, all phases run in one invocation.
+    You can also force phased execution with `--phase parse` regardless of diff size. If `--phase` is omitted and the diff is below the threshold, all phases run in one invocation.
 14. Read `<runDir>/99-final-result.json`.
 15. Read the run artifact directory from CLI output or `00-run-manifest.json`.
 16. Read `06-cluster-analysis-tasks.md`.

@@ -32,6 +32,7 @@ The skill is designed for large PRs and release diffs. It should not ask the use
    ```text
    uv run --project "<skill_root>" python "<skill_root>/scripts/front_end_impact_analyzer.py" --project-root "<target_project_root>" --diff-file "<generated_diff_path>"
    ```
+   If the diff exceeds `analysis.phasedExecutionThreshold` (default: 1000 lines), the analyzer **automatically** runs only the parse phase and prints the run dir. Follow the printed instructions to run `--phase scan` and `--phase analyze` as separate invocations. If the diff is below the threshold, the analyzer runs all phases in one invocation.
 8. Parse and index the diff.
 9. Classify non-logic noise such as format-only, comment-only, import-only, generated, lockfile, test-only, and style-only changes.
 10. Scan source code, build import/reverse-import graph, bind pages and routes.
@@ -94,6 +95,7 @@ Important config sections:
 - `diff.ignoreDirs`, `diff.ignoreFiles`, `diff.ignoreGlobs`: paths excluded from generated git diff.
 - `analysis.requireRepoWiki`, `analysis.requireRequirements`, `analysis.requireSpecs`: whether missing context should block or warn.
 - `analysis.maxClusterContextChars`: per-cluster evidence pack size budget.
+- `analysis.phasedExecutionThreshold`: diff line count threshold for automatic phased execution (default: 1000). When the diff exceeds this many lines, `--diff-file` automatically runs only the parse phase and instructs the agent to continue with `--phase scan` and `--phase analyze`. Set to 0 to disable auto-phasing.
 
 If required repo wiki is missing, tell the user to generate it with the repo-wiki skill before continuing.
 

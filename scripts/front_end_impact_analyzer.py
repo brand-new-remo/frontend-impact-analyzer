@@ -591,6 +591,15 @@ def main():
         raise SystemExit("--diff-file is required. Use --make-diff first to generate a diff, then pass the generated file path via --diff-file.")
 
     diff_text = diff_file.read_text(encoding="utf-8", errors="ignore")
+
+    # Auto-phase: if diff exceeds threshold, run parse phase only and stop
+    phased_threshold = int(config["analysis"].get("phasedExecutionThreshold", 1000))
+    diff_line_count = diff_text.count("\n")
+    if phased_threshold > 0 and diff_line_count > phased_threshold:
+        print(f"[auto-phase] diff has {diff_line_count} lines (threshold: {phased_threshold}), switching to phased execution")
+        run_phase_parse(args, project_root, config)
+        return
+
     requirement_text = Path(args.requirement_file).read_text(encoding="utf-8", errors="ignore") if args.requirement_file else ""
     manifest = build_run_manifest(project_root, config, args.base_branch, args.compare_branch, diff_file)
     run_dir = ensure_run_dir(manifest)
