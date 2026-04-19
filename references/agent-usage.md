@@ -17,7 +17,7 @@ The analyzer now produces an analysis package plus run artifacts:
 
 1. Run `--doctor` to check environment, including potential venv conflicts.
 2. Check whether `impact-analyzer.config.json` exists.
-3. If it does not exist, create it with `--init-config`, then ask the user to review and confirm before continuing. If the user wants to modify it (e.g., add ignored directories), wait until they finish.
+3. If it does not exist, create it with `--init-config`. The output will include `"userActionRequired": true`. **STOP here.** Show the user the config file path and key sections (`diff.ignoreDirs`, `diff.ignoreFiles`, `diff.ignoreGlobs`, `paths.*`, `analysis.requireRepoWiki`). Ask the user to review and confirm. **Do NOT proceed to any later step until the user explicitly says the config is ready.** If the user wants to modify it, wait until they finish and tell you to continue.
 4. If it already exists, do not overwrite or regenerate it. Load and use it directly.
 5. Run or inspect preflight through a normal analysis run.
 6. Ask whether to install the bundled Claude Code subagent templates into the target project's `.claude/agents/` directory.

@@ -12,7 +12,12 @@ The skill is designed for large PRs and release diffs. It should not ask the use
 ## Core Workflow
 
 1. Check whether `impact-analyzer.config.json` exists in the target project root.
-   - If it **does not exist**, run `--init-config` to generate a default config file. Then ask the user: "A default `impact-analyzer.config.json` has been created. Would you like to review or modify it before continuing? (e.g., add ignored directories, change output paths, etc.)" If the user wants to modify it, tell them to edit the file and let you know when they are ready. Do **not** proceed until the user confirms the config is acceptable.
+   - If it **does not exist**, run `--init-config` to generate a default config file. The command output will include `"userActionRequired": true` and a `STOP` instruction. **You MUST stop here and ask the user to review the generated config before doing anything else.** Show the user the config file path and the key sections they should check:
+     - `diff.ignoreDirs` / `diff.ignoreFiles` / `diff.ignoreGlobs` — controls which files are excluded from the git diff; this is critical for reducing diff size
+     - `paths.*` — document and output directories
+     - `analysis.requireRepoWiki` — whether repo-wiki is mandatory
+     Tell the user: "I have generated a default config file at `<path>`. Please review and modify it if needed (especially the `diff` ignore rules), then let me know when you are ready to continue."
+     **Do NOT run any subsequent steps (preflight, diff, analysis) until the user explicitly confirms the config is acceptable.** If the user says they want to modify it, wait for them to finish and tell you to continue.
    - If it **already exists**, do **not** overwrite or regenerate it. Load and use it directly. Never run `--init-config` again unless the user explicitly asks to reset the config with `--force-config`.
 2. Run preflight checks for repo wiki, requirements, specs, git state, and output paths.
 3. Check whether the bundled Claude Code subagent templates need to be installed.
@@ -89,17 +94,21 @@ If required repo wiki is missing, tell the user to generate it with the repo-wik
 
 ## Invocation
 
-Generate a diff from branches and analyze it:
+Generate a diff from branches and analyze it (recommended — applies config ignore rules automatically):
 
 ```text
 uv run --project "<skill_root>" python "<skill_root>/scripts/front_end_impact_analyzer.py" --project-root "<target_project_root>" --make-diff --base-branch "<base_branch>" --compare-branch "<compare_branch>"
 ```
 
-Analyze an existing diff:
+The `--make-diff` flag reads `diff.ignoreDirs`, `diff.ignoreFiles`, and `diff.ignoreGlobs` from `impact-analyzer.config.json` and passes them as `:(exclude)` pathspecs to `git diff`. This typically reduces diff size by 10-100x. The CLI will print the number of exclude pathspecs applied and the resulting diff size for verification.
+
+Analyze an existing diff (config ignore rules are NOT applied — only use this if you already have a filtered diff):
 
 ```text
 uv run --project "<skill_root>" python "<skill_root>/scripts/front_end_impact_analyzer.py" --project-root "<target_project_root>" --diff-file "<diff_file>"
 ```
+
+**Do not run `git diff` as a separate shell command and then pass the output to `--diff-file`.** This bypasses all configured ignore rules and produces an unnecessarily large diff.
 
 Optional arguments:
 
@@ -258,6 +267,9 @@ Refinement is semantic cleanup based on existing code and document evidence. It 
 
 ## Decision Rules
 
+- **When `--init-config` creates a new config file, STOP and wait for the user to confirm before continuing.** The config controls diff ignore rules, output paths, and analysis behavior. The user must have a chance to customize it. Do not proceed to preflight, diff generation, or analysis until the user explicitly says the config is ready.
+- **NEVER run `git diff` directly as a shell command.** Always use the analyzer's `--make-diff` flag to generate diff files. Only `--make-diff` applies the configured ignore rules from `impact-analyzer.config.json` (`diff.ignoreDirs`, `diff.ignoreFiles`, `diff.ignoreGlobs`). Running `git diff` manually will produce a full unfiltered diff that can be 10-100x larger than necessary.
+- If the user provides an existing diff file via `--diff-file`, warn them that config ignore rules were not applied and the diff may be unnecessarily large. Suggest regenerating with `--make-diff` if the diff is too large.
 - Do not analyze a 50k-line diff as one prompt-sized object.
 - Use `03-diff-index.json` for global overview.
 - Use `05-change-clusters.json` for prioritization.

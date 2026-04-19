@@ -80,6 +80,7 @@ def write_default_config(project_root: Path, config_file: Optional[Path] = None,
         return {
             "path": str(path),
             "action": "exists",
+            "userActionRequired": False,
             "message": f"Config already exists at {path}. Use --force-config to overwrite.",
         }
     action = "overwritten" if path.exists() else "created"
@@ -87,7 +88,19 @@ def write_default_config(project_root: Path, config_file: Optional[Path] = None,
     return {
         "path": str(path),
         "action": action,
-        "message": f"Config {action} at {path}",
+        "userActionRequired": True,
+        "message": (
+            f"Config {action} at {path}.\n"
+            ">>> STOP: Do NOT proceed to diff or analysis yet. <<<\n"
+            "Ask the user to review the config file and confirm or modify it before continuing.\n"
+            "Key sections to review:\n"
+            "  - diff.ignoreDirs: directories excluded from git diff (e.g. node_modules, dist)\n"
+            "  - diff.ignoreFiles: specific files excluded (e.g. lock files)\n"
+            "  - diff.ignoreGlobs: glob patterns excluded (e.g. *.map, __snapshots__)\n"
+            "  - paths.repoWikiDir, paths.requirementsDir, paths.specsDir: document directories\n"
+            "  - analysis.requireRepoWiki: whether repo-wiki is required\n"
+            "The user MUST confirm the config is acceptable before the workflow continues."
+        ),
     }
 
 
@@ -254,13 +267,23 @@ def make_diff_file(
     stamp = time.strftime("%Y%m%d_%H%M%S")
     diff_file = diff_dir / f"diff_{sanitize_branch(base_branch)}_to_{sanitize_branch(compare_branch)}_{stamp}.patch"
 
-    exclude_args = []
-    for pattern in _ignore_pathspecs(config, extra_ignore_dirs or []):
-        exclude_args.append(f":(exclude){pattern}")
+    pathspecs = _ignore_pathspecs(config, extra_ignore_dirs or [])
+    exclude_args = [f":(exclude){p}" for p in pathspecs]
+
+    # Diagnostic output so the user can verify ignores are applied
+    print(f"[make-diff] applying {len(pathspecs)} exclude pathspecs from config:")
+    for p in pathspecs:
+        print(f"  :(exclude){p}")
 
     cmd = ["git", "diff", "--no-ext-diff", f"{base_branch}...{compare_branch}", "--", "."] + exclude_args
+    print(f"[make-diff] running: git diff --no-ext-diff {base_branch}...{compare_branch} -- . <{len(exclude_args)} excludes>")
     result = subprocess.run(cmd, cwd=project_root, text=True, capture_output=True, check=True)
     diff_file.write_text(result.stdout, encoding="utf-8")
+
+    line_count = result.stdout.count("\n")
+    size_kb = len(result.stdout.encode("utf-8")) / 1024
+    print(f"[make-diff] diff written to: {diff_file}")
+    print(f"[make-diff] diff size: {line_count} lines, {size_kb:.1f} KB")
     return diff_file
 
 

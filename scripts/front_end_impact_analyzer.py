@@ -307,6 +307,12 @@ def main():
         base = args.base_branch or config["project"].get("defaultBaseBranch") or "main"
         compare = args.compare_branch or config["project"].get("defaultCompareBranch") or "HEAD"
         diff_file = make_diff_file(project_root, config, base, compare, args.ignore_dir)
+    elif diff_file is not None:
+        print(
+            "[warning] Using --diff-file bypasses the config ignore rules "
+            "(diff.ignoreDirs, diff.ignoreFiles, diff.ignoreGlobs). "
+            "If the diff is unexpectedly large, regenerate it with --make-diff instead."
+        )
     if diff_file is None:
         raise SystemExit("--diff-file is required unless --make-diff is used")
 
