@@ -15,10 +15,29 @@ class TsAstAnalyzer:
         self.ts_parser = Parser(Language(language_typescript()))
         self.tsx_parser = Parser(Language(language_tsx()))
 
-    def parse_file(self, file_path: Path, source: str) -> FileAstFacts:
-        parser = self.tsx_parser if file_path.suffix.lower() in {".tsx", ".jsx"} else self.ts_parser
+    def _pick_parser(self, file_path: Path) -> Parser:
+        return self.tsx_parser if file_path.suffix.lower() in {".tsx", ".jsx"} else self.ts_parser
+
+    def parse_tree(self, file_path: Path, source: str):
+        """Parse source and return (tree, source_bytes).  Reuse the tree for
+        both ``parse_imports_only`` and ``parse_file_from_tree``."""
+        parser = self._pick_parser(file_path)
         source_bytes = source.encode("utf-8")
         tree = parser.parse(source_bytes)
+        return tree, source_bytes
+
+    def parse_imports_only(self, file_path: Path, source_bytes: bytes, tree) -> FileAstFacts:
+        """Lightweight scan: only extracts imports, exports, reexports and
+        lazy_imports from top-level AST nodes.  ~5-10x faster than full walk."""
+        facts = FileAstFacts(file=str(file_path).replace('\\', '/'))
+        for child in tree.root_node.children:
+            self._walk_top_level(child, source_bytes, facts)
+        for attr in ["imports", "reexports", "exports", "lazy_imports"]:
+            setattr(facts, attr, uniq_keep_order(getattr(facts, attr)))
+        return facts
+
+    def parse_file_from_tree(self, file_path: Path, source_bytes: bytes, tree) -> FileAstFacts:
+        """Full AST walk using a pre-parsed tree (avoids re-parsing)."""
         facts = FileAstFacts(file=str(file_path).replace('\\', '/'))
         self._walk(tree.root_node, source_bytes, facts)
         for attr in [
@@ -29,8 +48,39 @@ class TsAstAnalyzer:
         facts.semantic_tags = uniq_keep_order(self._derive_semantic_tags(facts))
         return facts
 
+    def parse_file(self, file_path: Path, source: str) -> FileAstFacts:
+        tree, source_bytes = self.parse_tree(file_path, source)
+        return self.parse_file_from_tree(file_path, source_bytes, tree)
+
     def _text(self, node, source: bytes) -> str:
         return source[node.start_byte:node.end_byte].decode("utf-8", errors="ignore")
+
+    def _walk_top_level(self, node, source: bytes, facts: FileAstFacts):
+        """Extract only import/export/reexport/lazy from a single top-level node."""
+        node_type = node.type
+        txt = self._text(node, source)
+
+        if node_type == "import_statement":
+            m = re.search(r"""['\"]([^'\"]+)['\"]""", txt)
+            if m:
+                source_name = m.group(1)
+                facts.imports.append(source_name)
+                facts.import_bindings.extend(self._parse_import_bindings(txt, source_name))
+
+        if node_type in {"export_statement", "export_clause"}:
+            facts.exports.extend(self._parse_export_names(txt))
+            if "from" in txt:
+                m = re.search(r"""from\s+['\"]([^'\"]+)['\"]""", txt)
+                if m:
+                    source_name = m.group(1)
+                    facts.reexports.append(source_name)
+                    facts.reexport_bindings.extend(self._parse_reexport_bindings(txt, source_name))
+
+        # Catch top-level lazy() declarations
+        if node_type in {"lexical_declaration", "variable_declaration", "export_statement"}:
+            lazy_match = re.search(r"lazy\s*\(\s*\(\)\s*=>\s*import\(\s*['\"]([^'\"]+)['\"]\s*\)\s*\)", txt)
+            if lazy_match:
+                facts.lazy_imports.append(lazy_match.group(1))
 
     def _walk(self, node, source: bytes, facts: FileAstFacts):
         node_type = node.type

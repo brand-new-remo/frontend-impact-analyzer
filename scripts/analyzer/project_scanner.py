@@ -1,5 +1,5 @@
 from __future__ import annotations
-
+import re
 import os
 from collections import defaultdict
 from pathlib import Path
@@ -17,7 +17,9 @@ class ProjectScanner:
         self.ast = TsAstAnalyzer()
         self.aliases = load_tsconfig_aliases(project_root)
 
-    def scan(self) -> Tuple[Dict[str, List[str]], Dict[str, List[str]], List[str], List[RouteInfo], Dict[str, Dict], Dict[str, List[str]], List[str], Dict[str, List[str]], List[Dict[str, str]]]:
+    def scan(
+        self, changed_file_paths: Optional[List[str]] = None,
+    ) -> Tuple[Dict[str, List[str]], Dict[str, List[str]], List[str], List[RouteInfo], Dict[str, Dict], Dict[str, List[str]], List[str], Dict[str, List[str]], List[Dict[str, str]]]:
         imports: Dict[str, List[str]] = {}
         reverse_imports: Dict[str, List[str]] = defaultdict(list)
         pages: List[str] = []
@@ -28,18 +30,38 @@ class ProjectScanner:
         diagnostics: List[Dict[str, str]] = []
         route_records_by_file: Dict[str, List[Dict]] = {}
 
-        for file_path in self._collect_source_files():
+        all_files = self._collect_source_files()
+        total = len(all_files)
+        progress_step = max(1, total // 10)
+
+        # ------------------------------------------------------------------
+        # Phase 1: Lightweight import-only scan of ALL files.
+        # Builds the full import graph / reverse-import graph without doing
+        # expensive full-AST walks (JSX tags, component names, etc.).
+        # ------------------------------------------------------------------
+        print(f"[scan] Phase 1: lightweight import scan of {total} files …")
+        _tree_cache: Dict[str, Tuple] = {}  # rel -> (tree, source_bytes, file_path)
+        candidate_pages: List[str] = []
+        route_file_list: List[str] = []
+
+        for idx, file_path in enumerate(all_files):
+            if idx > 0 and idx % progress_step == 0:
+                print(f"[scan]   Phase 1 progress: {idx}/{total} ({idx * 100 // total}%)")
+
             rel = rel_path(file_path, self.project_root)
             content = safe_read_text(file_path)
-            facts = self.ast.parse_file(file_path, content)
+            tree, source_bytes = self.ast.parse_tree(file_path, content)
+            facts = self.ast.parse_imports_only(file_path, source_bytes, tree)
             facts.file = rel
-            route_records_by_file[rel] = self._extract_route_records(file_path, content)
 
-            route_lazy_imports = [record["lazy_import"] for record in route_records_by_file[rel] if record.get("lazy_import")]
+            # Cache parsed tree for Phase 2 reuse (avoids re-parsing)
+            _tree_cache[rel] = (tree, source_bytes, file_path)
+
+            # Resolve imports & build graph
             resolved_imports: List[str] = []
             resolved_import_bindings: List[Dict] = []
             resolved_reexport_bindings: List[Dict] = []
-            for raw in facts.imports + facts.reexports + facts.lazy_imports + route_lazy_imports:
+            for raw in facts.imports + facts.reexports + facts.lazy_imports:
                 resolved_paths = self._resolve_imports(file_path.parent, raw)
                 if not resolved_paths:
                     diagnostics.append({
@@ -67,11 +89,66 @@ class ProjectScanner:
             if facts.reexports:
                 barrel_files.append(rel)
                 barrel_evidence[rel] = imports[rel]
-            if self._is_page(rel, facts.__dict__):
-                pages.append(rel)
+            if self._is_page_candidate(rel):
+                candidate_pages.append(rel)
+            if self._is_route_file(rel):
+                route_file_list.append(rel)
 
         reverse_imports = {k: uniq_keep_order(v) for k, v in reverse_imports.items()}
+        print(f"[scan] Phase 1 done: {total} files, {len(candidate_pages)} candidate pages, {len(route_file_list)} route files")
+
+        # ------------------------------------------------------------------
+        # Phase 2: Full AST walk only for the subset of files that matter:
+        #   - changed files (from diff)
+        #   - reverse-dep chain of changed files
+        #   - candidate page files (need component_names / jsx_tags)
+        #   - route files (need route record extraction)
+        # ------------------------------------------------------------------
+        analysis_set = self._build_analysis_set(
+            changed_file_paths, reverse_imports, candidate_pages, route_file_list, imports,
+        )
+        phase2_files = [f for f in analysis_set if f in _tree_cache]
+        phase2_total = len(phase2_files)
+        phase2_step = max(1, phase2_total // 10)
+        print(f"[scan] Phase 2: full AST for {phase2_total}/{total} files …")
+
+        route_file_set = set(route_file_list)
+        for idx, rel in enumerate(phase2_files):
+            if idx > 0 and idx % phase2_step == 0:
+                print(f"[scan]   Phase 2 progress: {idx}/{phase2_total} ({idx * 100 // phase2_total}%)")
+
+            tree, source_bytes, file_path = _tree_cache[rel]
+            full_facts = self.ast.parse_file_from_tree(file_path, source_bytes, tree)
+            full_facts.file = rel
+            # Preserve resolved bindings computed in Phase 1
+            prev = ast_facts[rel]
+            full_facts.resolved_import_bindings = prev.get("resolved_import_bindings", [])
+            full_facts.resolved_reexport_bindings = prev.get("resolved_reexport_bindings", [])
+            ast_facts[rel] = full_facts.__dict__
+
+            # Extract route records only from route files
+            if rel in route_file_set:
+                route_records = self._extract_route_records_from_tree(file_path, source_bytes, tree)
+                route_records_by_file[rel] = route_records
+                # Resolve lazy imports discovered in route records
+                for record in route_records:
+                    lazy = record.get("lazy_import")
+                    if not lazy:
+                        continue
+                    for resolved in self._resolve_imports(file_path.parent, lazy):
+                        dep = rel_path(resolved, self.project_root)
+                        if dep not in imports.get(rel, []):
+                            imports.setdefault(rel, []).append(dep)
+                        if rel not in reverse_imports.get(dep, []):
+                            reverse_imports.setdefault(dep, []).append(rel)
+
+            # Confirm page status using full AST facts
+            if self._is_page(rel, ast_facts[rel]):
+                pages.append(rel)
+
+        _tree_cache.clear()
         pages = uniq_keep_order(pages)
+        print(f"[scan] Phase 2 done: {len(pages)} confirmed pages, {len(route_records_by_file)} route files processed")
 
         for rel_file, route_records in route_records_by_file.items():
             if route_records:
@@ -124,6 +201,57 @@ class ProjectScanner:
         if "/pages/" not in p and "/views/" not in p:
             return False
         return bool(facts.get("component_names") or facts.get("jsx_tags"))
+
+    def _is_page_candidate(self, rel_file: str) -> bool:
+        """Path-based heuristic: file lives under /pages/ or /views/."""
+        p = normalize_path(rel_file).lower()
+        return "/pages/" in p or "/views/" in p
+
+    def _is_route_file(self, rel_file: str) -> bool:
+        """Path-based heuristic: file lives under /router/ or /routes/ or has
+        'route' in its stem name."""
+        p = normalize_path(rel_file).lower()
+        stem = Path(rel_file).stem.lower()
+        return "/router/" in p or "/routes/" in p or "route" in stem
+
+    def _build_analysis_set(
+        self,
+        changed_file_paths: Optional[List[str]],
+        reverse_imports: Dict[str, List[str]],
+        candidate_pages: List[str],
+        route_files: List[str],
+        imports: Dict[str, List[str]],
+    ) -> set:
+        """Return the set of rel-paths that need a full AST walk in Phase 2."""
+        analysis_set: set = set()
+        # Always include candidate pages and route files
+        analysis_set.update(candidate_pages)
+        analysis_set.update(route_files)
+
+        if changed_file_paths is not None:
+            # Diff-driven mode: only include changed files + their dependents
+            known = set(imports.keys())
+            changed_in_project = [f for f in changed_file_paths if f in known]
+            analysis_set.update(changed_in_project)
+            # Walk reverse-import chain upward from changed files
+            queue = list(changed_in_project)
+            visited = set(changed_in_project)
+            while queue:
+                f = queue.pop(0)
+                for dep in reverse_imports.get(f, []):
+                    if dep not in visited:
+                        visited.add(dep)
+                        queue.append(dep)
+                        analysis_set.add(dep)
+        else:
+            # No diff info: fall back to full analysis of all files
+            analysis_set.update(imports.keys())
+        return analysis_set
+
+    def _extract_route_records_from_tree(self, file_path: Path, source_bytes: bytes, tree) -> List[Dict]:
+        """Like _extract_route_records but reuses a pre-parsed tree."""
+        content = source_bytes.decode("utf-8", errors="ignore")
+        return self._collect_route_objects(tree.root_node, content, source_bytes)
 
     def _expand_route_records(self, rel_file: str, route_records: List[Dict], imports: Dict[str, List[str]], ast_facts: Dict[str, Dict], pages: List[str], diagnostics: List[Dict[str, str]]) -> List[RouteInfo]:
         results: List[RouteInfo] = []
@@ -370,8 +498,6 @@ class ProjectScanner:
         return bool(re.match(r"^[A-Z][A-Za-z0-9_]*$", value))
 
     def _first_match(self, value_text: str, patterns: List[str]) -> Optional[str]:
-        import re
-
         for pattern in patterns:
             match = re.search(pattern, value_text)
             if match:

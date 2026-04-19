@@ -72,7 +72,10 @@ class FrontendImpactAnalysisEngine:
 
         self.recorder.log("scan_project", "running", "start scanning project with AST")
         scanner = ProjectScanner(self.project_root)
-        imports, reverse_imports, pages, routes, ast_facts, aliases, barrel_files, barrel_evidence, diagnostics = scanner.scan()
+        changed_file_paths = [cf.path for cf in changed_files]
+        imports, reverse_imports, pages, routes, ast_facts, aliases, barrel_files, barrel_evidence, diagnostics = scanner.scan(
+            changed_file_paths=changed_file_paths,
+        )
         self.recorder.log("scan_project", "done", f"scanned {len(imports)} source files, found {len(pages)} pages, {len(routes)} routes")
         self.store.set_graph(imports, reverse_imports, pages, routes, ast_facts, aliases, barrel_files, barrel_evidence, diagnostics)
 
