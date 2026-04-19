@@ -374,6 +374,9 @@ def main():
         engine.write_run_artifacts(run_dir, state)
         exit_code = 0
     except Exception as exc:
+        import traceback
+        print(f"[error] Analysis engine failed: {exc}", flush=True)
+        traceback.print_exc()
         engine.recorder.log("analysis", "failed", str(exc))
         engine.state.meta["analysisStatus"] = "failed"
         engine.state.meta["statusSummary"] = {
@@ -390,6 +393,31 @@ def main():
             "message": str(exc),
         })
         state = engine.state
+        # Still write whatever state we have so the user can inspect diagnostics
+        try:
+            failed_result = {
+                "meta": {
+                    "outputContract": "analysis-package-v2",
+                    "runId": manifest.get("runId"),
+                    "analysisStatus": "failed",
+                },
+                "summary": state.meta.get("statusSummary", {}),
+                "coverage": {},
+                "clusters": [],
+                "cases": [],
+                "fallbackCases": [],
+                "nextStepsForClaude": [
+                    f"Analysis failed with error: {exc}",
+                    "Check 98-analysis-state.json diagnostics for details.",
+                    "Common causes: encoding issues, unsupported file patterns, or missing dependencies.",
+                ],
+            }
+            state.output = failed_result
+            write_json(run_dir / "00-run-manifest.json", manifest)
+            write_json(run_dir / "98-analysis-state.json", asdict(state))
+            write_json(run_dir / "99-final-result.json", failed_result)
+        except Exception as write_exc:
+            print(f"[error] Failed to write error state: {write_exc}", flush=True)
         exit_code = 1
 
     if args.state_output:
