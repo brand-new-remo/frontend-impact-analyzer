@@ -153,7 +153,7 @@ class FrontendImpactAnalysisEngine:
         cluster_tasks = build_cluster_task_markdown(clusters, coverage)
         self.state.workflow["diffIndex"] = diff_index
         self.state.workflow["fileImpactSeeds"] = seeds
-        self.state.workflow["documentIndex"] = document_index
+        self.state.workflow["documentIndex"] = DocumentIndexer.strip_cached_text(document_index)
         self.state.workflow["changeClusters"] = clusters
         self.state.workflow["clusterAnalysisTasks"] = cluster_tasks
         self.state.workflow["clusterContexts"] = cluster_contexts
@@ -179,7 +179,7 @@ class FrontendImpactAnalysisEngine:
     def write_run_artifacts(self, run_dir: Path, state: AnalysisState) -> None:
         write_json(run_dir / "00-run-manifest.json", state.workflow["manifest"])
         write_json(run_dir / "01-preflight-report.json", state.workflow["preflight"])
-        write_json(run_dir / "02-document-index.json", state.workflow.get("documentIndex", {}))
+        write_json(run_dir / "02-document-index.json", DocumentIndexer.strip_cached_text(state.workflow.get("documentIndex", {})))
         write_json(run_dir / "03-diff-index.json", state.workflow["diffIndex"])
         write_json(run_dir / "04-file-impact-seeds.json", state.workflow["fileImpactSeeds"])
         write_json(run_dir / "05-change-clusters.json", state.workflow["changeClusters"])
@@ -190,10 +190,20 @@ class FrontendImpactAnalysisEngine:
         # Use to_dict() instead of asdict() — avoids recursive deep-copy on
         # the massive codeGraph/astFacts structure (orders of magnitude faster).
         # Compact JSON (no indent) further cuts serialisation + I/O time.
+        # Strip heavy codeGraph fields (imports, reverseImports, astFacts) from
+        # the state file — they are already persisted in phase-02-scan.json and
+        # can make 98-analysis-state.json hundreds of MB for large projects.
+        state_dict = state.to_dict()
+        code_graph = state_dict.get("codeGraph")
+        if isinstance(code_graph, dict):
+            for key in ("imports", "reverseImports", "astFacts"):
+                if key in code_graph and isinstance(code_graph[key], dict) and len(code_graph[key]) > 50:
+                    code_graph[key] = {"_stripped": True, "fileCount": len(code_graph[key]),
+                                       "note": "see phase-02-scan.json for full data"}
         state_path = run_dir / "98-analysis-state.json"
         state_path.parent.mkdir(parents=True, exist_ok=True)
         state_path.write_text(
-            json.dumps(state.to_dict(), ensure_ascii=False, separators=(",", ":")),
+            json.dumps(state_dict, ensure_ascii=False, separators=(",", ":")),
             encoding="utf-8",
         )
         write_json(run_dir / "99-final-result.json", state.output)
@@ -559,7 +569,7 @@ def run_phase_cluster(args, project_root: Path, config: dict) -> None:
     cluster_tasks = build_cluster_task_markdown(clusters, coverage)
     engine.state.workflow["diffIndex"] = diff_index
     engine.state.workflow["fileImpactSeeds"] = seeds
-    engine.state.workflow["documentIndex"] = document_index
+    engine.state.workflow["documentIndex"] = DocumentIndexer.strip_cached_text(document_index)
     engine.state.workflow["changeClusters"] = clusters
     engine.state.workflow["clusterAnalysisTasks"] = cluster_tasks
     engine.state.workflow["clusterContexts"] = cluster_contexts

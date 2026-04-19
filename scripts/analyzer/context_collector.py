@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import re
+from functools import lru_cache
 from pathlib import Path
 from typing import Dict, List
 
@@ -29,6 +30,7 @@ class DocumentIndexer:
                 "headings": self._headings(text),
                 "keywords": self._keywords(profile_file, text),
                 "charCount": len(text),
+                "_text": text,
             })
         for kind, key in [
             ("repo-wiki", "repoWikiDir"),
@@ -49,18 +51,30 @@ class DocumentIndexer:
                         "headings": self._headings(text),
                         "keywords": self._keywords(path, text),
                         "charCount": len(text),
+                        "_text": text,
                     })
         return {
             "documentCount": len(documents),
             "documents": documents,
         }
 
+    @staticmethod
+    def strip_cached_text(document_index: Dict) -> Dict:
+        """Return a copy of the document index without the cached _text fields,
+        suitable for writing to disk."""
+        return {
+            "documentCount": document_index.get("documentCount", 0),
+            "documents": [
+                {k: v for k, v in doc.items() if k != "_text"}
+                for doc in document_index.get("documents", [])
+            ],
+        }
+
     def retrieve(self, document_index: Dict, cluster: Dict, limit: int = 6) -> List[Dict]:
         keywords = self._cluster_keywords(cluster)
         scored = []
         for doc in document_index.get("documents", []):
-            path = self.project_root / doc["path"]
-            text = safe_read_text(path)
+            text = doc.get("_text") or safe_read_text(self.project_root / doc["path"])
             snippets = self._snippets(text, keywords)
             matched = uniq_keep_order([kw for kw in keywords if kw and kw.lower() in (doc["path"] + " " + doc["title"] + " " + text[:12000]).lower()])
             if matched and not snippets:
@@ -178,6 +192,13 @@ class ClusterContextCollector:
         self.document_index = document_index
         self.routes = routes or []
         self.doc_indexer = DocumentIndexer(project_root, config)
+        self._file_cache: Dict[str, str] = {}
+
+    def _cached_read(self, file_path: str) -> str:
+        """Read a source file with per-instance caching to avoid redundant I/O."""
+        if file_path not in self._file_cache:
+            self._file_cache[file_path] = safe_read_text(self.project_root / file_path)
+        return self._file_cache[file_path]
 
     def collect(self, cluster: Dict, diff_index: Dict) -> Dict:
         max_files = int(self.config["analysis"].get("maxFilesPerClusterContext", 8))
@@ -227,8 +248,7 @@ class ClusterContextCollector:
         return uniq_keep_order(files)
 
     def _code_evidence(self, file_path: str, cluster: Dict, diff_item: Dict | None) -> Dict:
-        path = self.project_root / file_path
-        content = safe_read_text(path)
+        content = self._cached_read(file_path)
         snippet = self._focused_snippet(content, cluster)
         return {
             "file": normalize_path(file_path),
@@ -282,7 +302,7 @@ class ClusterContextCollector:
         limit = int(self.config["analysis"].get("maxCommentEvidencePerCluster", 20))
         comments: List[Dict] = []
         for file_path in files:
-            content = safe_read_text(self.project_root / file_path)
+            content = self._cached_read(file_path)
             if not content:
                 continue
             hunk_ranges = self._hunk_line_ranges(diff_by_file.get(file_path, {}))
@@ -554,38 +574,43 @@ class ClusterContextCollector:
 
     def _apply_context_budget(self, context: Dict) -> Dict:
         max_chars = int(self.config["analysis"].get("maxClusterContextChars", 60000))
+        estimated = self._estimated_chars(context)
         context["contextBudget"] = {
             "maxChars": max_chars,
-            "estimatedChars": self._estimated_chars(context),
+            "estimatedChars": estimated,
             "truncated": False,
             "strategy": "trim code snippets first, then document snippets",
         }
-        if context["contextBudget"]["estimatedChars"] <= max_chars:
+        if estimated <= max_chars:
             return context
 
+        # Trim code snippets — track saved chars instead of re-serialising.
         for item in context.get("codeEvidence", []):
             snippet = item.get("snippet", "")
             if len(snippet) > 1200:
+                estimated -= (len(snippet) - 1200)
                 item["snippet"] = snippet[:1200]
                 item["snippetTruncatedByBudget"] = True
-            context["contextBudget"]["estimatedChars"] = self._estimated_chars(context)
-            if context["contextBudget"]["estimatedChars"] <= max_chars:
+            if estimated <= max_chars:
                 context["contextBudget"]["truncated"] = True
+                context["contextBudget"]["estimatedChars"] = estimated
                 return context
 
+        # Trim document snippets.
         for doc in context.get("documentCandidates", []):
             for snippet in doc.get("candidateSnippets", []):
                 text = snippet.get("snippet", "")
                 if len(text) > 500:
+                    estimated -= (len(text) - 500)
                     snippet["snippet"] = text[:500]
                     snippet["snippetTruncatedByBudget"] = True
-            context["contextBudget"]["estimatedChars"] = self._estimated_chars(context)
-            if context["contextBudget"]["estimatedChars"] <= max_chars:
+            if estimated <= max_chars:
                 context["contextBudget"]["truncated"] = True
+                context["contextBudget"]["estimatedChars"] = estimated
                 return context
 
         context["contextBudget"]["truncated"] = True
-        context["contextBudget"]["estimatedChars"] = self._estimated_chars(context)
+        context["contextBudget"]["estimatedChars"] = estimated
         return context
 
     def _estimated_chars(self, value: Dict) -> int:
