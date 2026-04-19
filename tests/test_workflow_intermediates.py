@@ -13,13 +13,23 @@ from front_end_impact_analyzer import FrontendImpactAnalysisEngine
 def test_default_config_can_be_written_and_loaded(tmp_path):
     config_path = tmp_path / "impact-analyzer.config.json"
 
-    written = write_default_config(tmp_path, config_path)
-    config = load_config(tmp_path, written)
+    result = write_default_config(tmp_path, config_path)
+    assert result["action"] == "created"
+    assert Path(result["path"]) == config_path
 
-    assert written == config_path
+    config = load_config(tmp_path, config_path)
+
     assert config["paths"]["diffDir"] == ".impact-analysis/diffs"
     assert config["analysis"]["maxFilesPerClusterContext"] == 8
     assert config["analysis"]["maxClusterContextChars"] == 60000
+
+    # Second call should not overwrite
+    result2 = write_default_config(tmp_path, config_path)
+    assert result2["action"] == "exists"
+
+    # Force overwrite should work
+    result3 = write_default_config(tmp_path, config_path, force=True)
+    assert result3["action"] == "overwritten"
 
 
 def test_manifest_uses_stable_branch_sanitization(tmp_path):

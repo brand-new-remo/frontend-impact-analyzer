@@ -15,23 +15,25 @@ The analyzer now produces an analysis package plus run artifacts:
 
 ## Recommended Agent Pattern
 
-1. Check whether `impact-analyzer.config.json` exists.
-2. If it does not exist, create it with `--init-config` or ask the user before creating it.
-3. Run or inspect preflight through a normal analysis run.
-4. Ask whether to install the bundled Claude Code subagent templates into the target project's `.claude/agents/` directory.
-5. If the user confirms, run `--install-claude-agents`; only use `--overwrite-claude-agents` after explicit confirmation.
-6. If required repo wiki / requirements / specs are missing, stop and ask the user to generate or provide them.
-7. Ask which base branch and compare branch to diff, unless the user already provided them.
-8. Ask whether configured diff ignores are acceptable and whether extra ignored folders are needed.
-9. Generate the diff with `--make-diff`, or use the provided diff file.
-10. Run the analyzer.
-11. Read `<runDir>/99-final-result.json`.
-12. Read the run artifact directory from CLI output or `00-run-manifest.json`.
-13. Read `06-cluster-analysis-tasks.md`.
-14. For large diffs, use clusters as the primary workflow.
-15. Analyze prioritized clusters one at a time and write `cluster-analysis/*.analysis.json`.
-16. After writing cluster-analysis files, run merge and use the merged `cases` as the final cases.
-17. Read `validationReports` and fix generic or unsupported cases when needed.
+1. Run `--doctor` to check environment, including potential venv conflicts.
+2. Check whether `impact-analyzer.config.json` exists.
+3. If it does not exist, create it with `--init-config`, then ask the user to review and confirm before continuing. If the user wants to modify it (e.g., add ignored directories), wait until they finish.
+4. If it already exists, do not overwrite or regenerate it. Load and use it directly.
+5. Run or inspect preflight through a normal analysis run.
+6. Ask whether to install the bundled Claude Code subagent templates into the target project's `.claude/agents/` directory.
+7. If the user confirms, run `--install-claude-agents`; only use `--overwrite-claude-agents` after explicit confirmation. After installing, tell the user to restart the Claude Code session or use `/agents` so the new subagents are loaded.
+8. If required repo wiki / requirements / specs are missing, stop and ask the user to generate or provide them.
+9. Ask which base branch and compare branch to diff, unless the user already provided them.
+10. Ask whether configured diff ignores are acceptable and whether extra ignored folders are needed.
+11. Generate the diff with `--make-diff`. Always use `--make-diff` instead of manual `git diff` — only `--make-diff` applies the configured ignore rules from `impact-analyzer.config.json`.
+12. Run the analyzer.
+13. Read `<runDir>/99-final-result.json`.
+14. Read the run artifact directory from CLI output or `00-run-manifest.json`.
+15. Read `06-cluster-analysis-tasks.md`.
+16. For large diffs, use clusters as the primary workflow.
+17. Analyze prioritized clusters one at a time and write `cluster-analysis/*.analysis.json`.
+18. After writing cluster-analysis files, run merge and use the merged `cases` as the final cases.
+19. Read `validationReports` and fix generic or unsupported cases when needed.
 
 ## Cluster Workflow
 

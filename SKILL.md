@@ -11,11 +11,17 @@ The skill is designed for large PRs and release diffs. It should not ask the use
 
 ## Core Workflow
 
-1. Load or create `impact-analyzer.config.json`.
+1. Check whether `impact-analyzer.config.json` exists in the target project root.
+   - If it **does not exist**, run `--init-config` to generate a default config file. Then ask the user: "A default `impact-analyzer.config.json` has been created. Would you like to review or modify it before continuing? (e.g., add ignored directories, change output paths, etc.)" If the user wants to modify it, tell them to edit the file and let you know when they are ready. Do **not** proceed until the user confirms the config is acceptable.
+   - If it **already exists**, do **not** overwrite or regenerate it. Load and use it directly. Never run `--init-config` again unless the user explicitly asks to reset the config with `--force-config`.
 2. Run preflight checks for repo wiki, requirements, specs, git state, and output paths.
-3. Ask the user for base branch and compare branch if they were not provided.
-4. Ask whether to use configured diff ignores and whether to add extra ignored folders.
-5. Generate a named diff file when `--make-diff` is used.
+3. Check whether the bundled Claude Code subagent templates need to be installed.
+   - Ask the user: "This skill includes optional Claude Code subagents (change-intent-judge, evidence-checker, case-writer, case-refiner). Would you like to install them into your project's `.claude/agents/` directory?"
+   - If the user confirms, run `--install-claude-agents`. If agents already exist at the target, inform the user and only overwrite after explicit confirmation with `--overwrite-claude-agents`.
+   - After installing agents, tell the user to restart the Claude Code session or use `/agents` so Claude Code loads the new project subagents.
+   - If the user declines, skip this step and continue without subagents.
+4. Ask the user for base branch and compare branch if they were not provided.
+5. Generate the diff using `--make-diff`. The analyzer automatically applies all ignore rules from the config file (`diff.ignoreDirs`, `diff.ignoreFiles`, `diff.ignoreGlobs`) as git pathspec excludes, which can dramatically reduce diff size. Ask whether the user wants to add extra ignored folders beyond what the config already specifies. **Always use `--make-diff` instead of running `git diff` manually**, because only `--make-diff` applies the configured ignore rules.
 6. Parse and index the diff.
 7. Classify non-logic noise such as format-only, comment-only, import-only, generated, lockfile, test-only, and style-only changes.
 8. Scan source code, build import/reverse-import graph, bind pages and routes.
@@ -35,6 +41,13 @@ Command path rule:
 - Always run the bundled analyzer with `uv run --project "<skill_root>" python "<skill_root>/scripts/front_end_impact_analyzer.py"`.
 - On Windows PowerShell, use the same one-line commands below and quote paths. Do not use Bash `\` line continuations; PowerShell uses backticks for line continuation, but one-line commands are preferred.
 - Before the first run in a new environment, run `--doctor`. If `uv` is missing, stop and tell the user to install uv before continuing; do not guess a different command unless the user explicitly asks for a non-uv fallback.
+- If the target project also uses uv and has its own virtual environment, the `--project "<skill_root>"` flag isolates the skill's dependencies. However, if the target project's venv is activated in the current shell (`VIRTUAL_ENV` is set), it may interfere. In that case, deactivate first or prefix the command with `VIRTUAL_ENV=` to unset it:
+
+```text
+VIRTUAL_ENV= uv run --project "<skill_root>" python "<skill_root>/scripts/front_end_impact_analyzer.py" --project-root "<target_project_root>" ...
+```
+
+The `--doctor` command will detect and warn about potential venv conflicts.
 
 Environment check:
 
@@ -52,6 +65,12 @@ Create it when missing:
 
 ```text
 uv run --project "<skill_root>" python "<skill_root>/scripts/front_end_impact_analyzer.py" --project-root "<target_project_root>" --init-config
+```
+
+This command is safe: it will **not** overwrite an existing config file. If the file already exists, it prints a message and exits without changes. To force overwrite an existing config (only when the user explicitly asks to reset), add `--force-config`:
+
+```text
+uv run --project "<skill_root>" python "<skill_root>/scripts/front_end_impact_analyzer.py" --project-root "<target_project_root>" --init-config --force-config
 ```
 
 Important config sections:
@@ -86,6 +105,7 @@ Optional arguments:
 
 ```text
 --config-file <config_json>
+--force-config
 --project-profile-file <project_profile_md>
 --ignore-dir <extra_dir_to_ignore>
 --analysis-output-dir <run_output_dir>

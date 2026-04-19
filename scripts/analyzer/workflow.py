@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import re
 import shutil
 import subprocess
@@ -71,10 +72,23 @@ def load_config(project_root: Path, config_file: Optional[Path] = None) -> Dict:
     return _deep_merge(json.loads(json.dumps(DEFAULT_CONFIG)), loaded)
 
 
-def write_default_config(project_root: Path, config_file: Optional[Path] = None) -> Path:
+def write_default_config(project_root: Path, config_file: Optional[Path] = None, force: bool = False) -> Dict:
+    """Create default config file.  Returns a status dict with ``path``, ``action``
+    (``created`` / ``exists`` / ``overwritten``), and ``message``."""
     path = config_file or project_root / "impact-analyzer.config.json"
+    if path.exists() and not force:
+        return {
+            "path": str(path),
+            "action": "exists",
+            "message": f"Config already exists at {path}. Use --force-config to overwrite.",
+        }
+    action = "overwritten" if path.exists() else "created"
     path.write_text(json.dumps(DEFAULT_CONFIG, ensure_ascii=False, indent=2), encoding="utf-8")
-    return path
+    return {
+        "path": str(path),
+        "action": action,
+        "message": f"Config {action} at {path}",
+    }
 
 
 def build_run_manifest(
@@ -179,11 +193,50 @@ def doctor(project_root: Path, skill_root: Path) -> Dict:
 
     checks.append(_git_check(project_root))
 
+    # Detect potential venv conflict: if VIRTUAL_ENV is set and points to a
+    # different project, the skill's dependencies may not be available.
+    active_venv = os.environ.get("VIRTUAL_ENV", "")
+    skill_venv = str(skill_root / ".venv")
+    if active_venv and not Path(active_venv).resolve().is_relative_to(skill_root.resolve()):
+        checks.append({
+            "name": "venv-isolation",
+            "required": False,
+            "status": "warning",
+            "message": (
+                f"VIRTUAL_ENV is set to {active_venv} which belongs to another project. "
+                "This may cause import errors. Deactivate the current venv first, or "
+                "prefix the command with: VIRTUAL_ENV= uv run --project ..."
+            ),
+        })
+    else:
+        checks.append({
+            "name": "venv-isolation",
+            "required": False,
+            "status": "ok",
+            "message": "no conflicting VIRTUAL_ENV detected",
+        })
+
+    # Check if CWD has a different pyproject.toml that might confuse uv
+    cwd_pyproject = Path.cwd() / "pyproject.toml"
+    if cwd_pyproject.exists() and cwd_pyproject.resolve() != (skill_root / "pyproject.toml").resolve():
+        checks.append({
+            "name": "cwd-project-isolation",
+            "required": False,
+            "status": "info",
+            "message": (
+                f"CWD has its own pyproject.toml at {cwd_pyproject}. "
+                "The --project flag should isolate the skill environment, but if you see "
+                "import errors, ensure you are using: uv run --project \"<skill_root>\" ..."
+            ),
+        })
+
     missing = [item for item in checks if item["required"] and item["status"] != "ok"]
+    warnings = [item for item in checks if item["status"] == "warning"]
     analyzer_script = skill_root / "scripts" / "front_end_impact_analyzer.py"
     return {
         "status": "ok" if not missing else "blocked",
         "checks": checks,
+        "warnings": [item["message"] for item in warnings],
         "recommendedCommandPrefix": f'uv run --project "{skill_root}" python "{analyzer_script}"',
         "blockingActions": [_doctor_action(item) for item in missing],
     }

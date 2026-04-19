@@ -244,6 +244,7 @@ def main():
     parser.add_argument("--config-file")
     parser.add_argument("--project-profile-file")
     parser.add_argument("--init-config", action="store_true")
+    parser.add_argument("--force-config", action="store_true", help="Force overwrite existing config file when used with --init-config")
     parser.add_argument("--doctor", action="store_true")
     parser.add_argument("--make-diff", action="store_true")
     parser.add_argument("--base-branch")
@@ -280,8 +281,10 @@ def main():
     config_file = Path(args.config_file).resolve() if args.config_file else None
     diff_file = Path(args.diff_file).resolve() if args.diff_file else None
     if args.init_config:
-        path = write_default_config(project_root, config_file)
-        print(f"config written to: {path}")
+        result = write_default_config(project_root, config_file, force=args.force_config)
+        print(json.dumps(result, ensure_ascii=False, indent=2))
+        if result["action"] == "exists":
+            raise SystemExit(0)
         return
 
     if args.install_claude_agents:
