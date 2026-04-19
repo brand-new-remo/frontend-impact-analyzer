@@ -277,11 +277,12 @@ def make_diff_file(
 
     cmd = ["git", "diff", "--no-ext-diff", f"{base_branch}...{compare_branch}", "--", "."] + exclude_args
     print(f"[make-diff] running: git diff --no-ext-diff {base_branch}...{compare_branch} -- . <{len(exclude_args)} excludes>")
-    result = subprocess.run(cmd, cwd=project_root, text=True, capture_output=True, check=True)
-    diff_file.write_text(result.stdout, encoding="utf-8")
+    result = subprocess.run(cmd, cwd=project_root, capture_output=True, encoding="utf-8", errors="replace", check=True)
+    diff_text = result.stdout or ""
+    diff_file.write_text(diff_text, encoding="utf-8")
 
-    line_count = result.stdout.count("\n")
-    size_kb = len(result.stdout.encode("utf-8")) / 1024
+    line_count = diff_text.count("\n")
+    size_kb = len(diff_text.encode("utf-8")) / 1024
     print(f"[make-diff] diff written to: {diff_file}")
     print(f"[make-diff] diff size: {line_count} lines, {size_kb:.1f} KB")
     return diff_file
@@ -367,7 +368,7 @@ def _resolve_project_path(project_root: Path, value: str) -> Path:
 
 def _git_check(project_root: Path) -> Dict:
     try:
-        result = subprocess.run(["git", "rev-parse", "--is-inside-work-tree"], cwd=project_root, text=True, capture_output=True, check=True)
+        result = subprocess.run(["git", "rev-parse", "--is-inside-work-tree"], cwd=project_root, capture_output=True, encoding="utf-8", errors="replace", check=True)
         ok = result.stdout.strip() == "true"
         return {
             "name": "git",
