@@ -17,15 +17,15 @@ The analyzer now produces an analysis package plus run artifacts:
 
 1. Run `--doctor` to check environment, including potential venv conflicts.
 2. Check whether `impact-analyzer.config.json` exists.
-3. If it does not exist, create it with `--init-config`. The output will include `"userActionRequired": true`. **STOP here.** Show the user the config file path and key sections (`diff.ignoreDirs`, `diff.ignoreFiles`, `diff.ignoreGlobs`, `paths.*`, `analysis.requireRepoWiki`). Ask the user to review and confirm. **Do NOT proceed to any later step until the user explicitly says the config is ready.** If the user wants to modify it, wait until they finish and tell you to continue.
+3. If it does not exist, create it with `--init-config`. The output will include `"userActionRequired": true`. **STOP here.** Show the user the config file path and key sections (`diff.includePaths`, `diff.ignoreDirs`, `diff.ignoreFiles`, `diff.ignoreGlobs`, `paths.*`, `analysis.requireRepoWiki`). Ask the user to review and confirm. **Do NOT proceed to any later step until the user explicitly says the config is ready.** If the user wants to modify it, wait until they finish and tell you to continue.
 4. If it already exists, do not overwrite or regenerate it. Load and use it directly.
 5. Run or inspect preflight through a normal analysis run.
 6. Ask whether to install the bundled Claude Code subagent templates into the target project's `.claude/agents/` directory.
 7. If the user confirms, run `--install-claude-agents`; only use `--overwrite-claude-agents` after explicit confirmation. After installing, tell the user to restart the Claude Code session or use `/agents` so the new subagents are loaded.
 8. If required repo wiki / requirements / specs are missing, stop and ask the user to generate or provide them.
 9. Ask which base branch and compare branch to diff, unless the user already provided them.
-10. Ask whether configured diff ignores are acceptable and whether extra ignored folders are needed.
-11. Generate the diff with `--make-diff`. This **only generates the diff file and stops** — it does not start analysis. Always use `--make-diff` instead of manual `git diff` — only `--make-diff` applies the configured ignore rules from `impact-analyzer.config.json`.
+10. Ask whether configured diff include paths and ignores are acceptable and whether extra paths or ignored folders are needed.
+11. Generate the diff with `--make-diff`. This **only generates the diff file and stops** — it does not start analysis. Always use `--make-diff` instead of manual `git diff` — only `--make-diff` applies the configured include paths and ignore rules from `impact-analyzer.config.json`.
 12. Show the user the generated diff path and size stats. Ask whether the diff size is acceptable. If too large, suggest adjusting ignore rules in the config.
 13. Once the user confirms, run analysis with `--diff-file "<generated_diff_path>"`. If the diff exceeds `analysis.phasedExecutionThreshold` (default 1000 lines), the analyzer **automatically** runs only the parse phase and prints the run dir and the exact next command. Follow the printed instructions to run each subsequent phase:
     - `--phase scan --run-dir "<run_dir>"` → writes `phase-02-scan.json`

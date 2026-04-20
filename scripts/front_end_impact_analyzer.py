@@ -841,6 +841,7 @@ def main():
     parser.add_argument("--base-branch")
     parser.add_argument("--compare-branch")
     parser.add_argument("--ignore-dir", action="append", default=[])
+    parser.add_argument("--include-path", action="append", default=[], help="Include only these paths in diff (positive selection). Can be repeated.")
     parser.add_argument("--analysis-output-dir")
     parser.add_argument("--install-claude-agents", action="store_true")
     parser.add_argument("--overwrite-claude-agents", action="store_true")
@@ -901,7 +902,7 @@ def main():
     if args.make_diff:
         base = args.base_branch or config["project"].get("defaultBaseBranch") or "main"
         compare = args.compare_branch or config["project"].get("defaultCompareBranch") or "HEAD"
-        diff_file = make_diff_file(project_root, config, base, compare, args.ignore_dir)
+        diff_file = make_diff_file(project_root, config, base, compare, args.ignore_dir, args.include_path)
         # --make-diff only generates the diff and stops.
         # Analysis requires a separate invocation with --diff-file.
         diff_text = diff_file.read_text(encoding="utf-8", errors="ignore")

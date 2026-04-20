@@ -29,6 +29,7 @@ DEFAULT_CONFIG: Dict = {
         "outputDir": ".impact-analysis/runs",
     },
     "diff": {
+        "includePaths": [],
         "ignoreDirs": [
             "node_modules",
             "dist",
@@ -96,6 +97,7 @@ def write_default_config(project_root: Path, config_file: Optional[Path] = None,
             ">>> STOP: Do NOT proceed to diff or analysis yet. <<<\n"
             "Ask the user to review the config file and confirm or modify it before continuing.\n"
             "Key sections to review:\n"
+            "  - diff.includePaths: directories/files to include in diff (empty = all files)\n"
             "  - diff.ignoreDirs: directories excluded from git diff (e.g. node_modules, dist)\n"
             "  - diff.ignoreFiles: specific files excluded (e.g. lock files)\n"
             "  - diff.ignoreGlobs: glob patterns excluded (e.g. *.map, __snapshots__)\n"
@@ -263,22 +265,35 @@ def make_diff_file(
     base_branch: str,
     compare_branch: str,
     extra_ignore_dirs: Optional[List[str]] = None,
+    extra_include_paths: Optional[List[str]] = None,
 ) -> Path:
     diff_dir = _resolve_project_path(project_root, config["paths"]["diffDir"])
     diff_dir.mkdir(parents=True, exist_ok=True)
     stamp = time.strftime("%Y%m%d_%H%M%S")
     diff_file = diff_dir / f"diff_{sanitize_branch(base_branch)}_to_{sanitize_branch(compare_branch)}_{stamp}.patch"
 
+    # --- include paths (positive selection) ---
+    include_paths = _include_pathspecs(config, extra_include_paths or [])
+    if include_paths:
+        path_args = include_paths
+        print(f"[make-diff] include paths ({len(include_paths)}):")
+        for p in include_paths:
+            print(f"  {p}")
+    else:
+        path_args = ["."]
+        print("[make-diff] include paths: . (all files)")
+
+    # --- exclude pathspecs (negative selection) ---
     pathspecs = _ignore_pathspecs(config, extra_ignore_dirs or [])
     exclude_args = [f":(exclude){p}" for p in pathspecs]
 
-    # Diagnostic output so the user can verify ignores are applied
-    print(f"[make-diff] applying {len(pathspecs)} exclude pathspecs from config:")
+    print(f"[make-diff] exclude pathspecs ({len(pathspecs)}):")
     for p in pathspecs:
         print(f"  :(exclude){p}")
 
-    cmd = ["git", "diff", "--no-ext-diff", f"{base_branch}...{compare_branch}", "--", "."] + exclude_args
-    print(f"[make-diff] running: git diff --no-ext-diff {base_branch}...{compare_branch} -- . <{len(exclude_args)} excludes>")
+    cmd = ["git", "diff", "--no-ext-diff", f"{base_branch}...{compare_branch}", "--"] + path_args + exclude_args
+    summary_paths = " ".join(path_args) if len(path_args) <= 5 else f"{' '.join(path_args[:3])} ... ({len(path_args)} total)"
+    print(f"[make-diff] running: git diff --no-ext-diff {base_branch}...{compare_branch} -- {summary_paths} <{len(exclude_args)} excludes>")
     result = subprocess.run(cmd, cwd=project_root, capture_output=True, encoding="utf-8", errors="replace", check=True)
     diff_text = result.stdout or ""
     diff_file.write_text(diff_text, encoding="utf-8")
@@ -413,6 +428,26 @@ def _ignore_pathspecs(config: Dict, extra_ignore_dirs: List[str]) -> List[str]:
     patterns.extend(str(item).strip() for item in config["diff"].get("ignoreFiles", []) if str(item).strip())
     patterns.extend(str(item).strip() for item in config["diff"].get("ignoreGlobs", []) if str(item).strip())
     return patterns
+
+
+def _include_pathspecs(config: Dict, extra_include_paths: List[str]) -> List[str]:
+    """Build the list of positive include paths from config + CLI extras.
+
+    Each entry should be a directory or file path relative to the project root,
+    e.g. ``["src/", "common/", "mobile/"]``.  Trailing slashes are preserved
+    so git treats them as directory prefixes.
+
+    Returns an empty list when no include paths are configured, which means
+    "include everything" (the caller should fall back to ``["."]``).
+    """
+    raw: List[str] = list(config["diff"].get("includePaths", []))
+    raw.extend(extra_include_paths)
+    paths: List[str] = []
+    for item in raw:
+        cleaned = str(item).strip()
+        if cleaned:
+            paths.append(cleaned)
+    return paths
 
 
 # ---------------------------------------------------------------------------

@@ -13,6 +13,7 @@ The skill is designed for large PRs and release diffs. It should not ask the use
 
 1. Check whether `impact-analyzer.config.json` exists in the target project root.
    - If it **does not exist**, run `--init-config` to generate a default config file. The command output will include `"userActionRequired": true` and a `STOP` instruction. **You MUST stop here and ask the user to review the generated config before doing anything else.** Show the user the config file path and the key sections they should check:
+     - `diff.includePaths` — positive selection of directories/files to include in the git diff (empty = all files); when set, only these paths appear in the diff
      - `diff.ignoreDirs` / `diff.ignoreFiles` / `diff.ignoreGlobs` — controls which files are excluded from the git diff; this is critical for reducing diff size
      - `paths.*` — document and output directories
      - `analysis.requireRepoWiki` — whether repo-wiki is mandatory
@@ -26,7 +27,7 @@ The skill is designed for large PRs and release diffs. It should not ask the use
    - After installing agents, tell the user to restart the Claude Code session or use `/agents` so Claude Code loads the new project subagents.
    - If the user declines, skip this step and continue without subagents.
 4. Ask the user for base branch and compare branch if they were not provided.
-5. Generate the diff using `--make-diff`. This command **only generates the diff file and stops** — it does not start analysis. The analyzer automatically applies all ignore rules from the config file (`diff.ignoreDirs`, `diff.ignoreFiles`, `diff.ignoreGlobs`) as git pathspec excludes, which can dramatically reduce diff size. Ask whether the user wants to add extra ignored folders beyond what the config already specifies. **Always use `--make-diff` instead of running `git diff` manually**, because only `--make-diff` applies the configured ignore rules.
+5. Generate the diff using `--make-diff`. This command **only generates the diff file and stops** — it does not start analysis. The analyzer automatically applies include paths (`diff.includePaths`) and all ignore rules from the config file (`diff.ignoreDirs`, `diff.ignoreFiles`, `diff.ignoreGlobs`) as git pathspec arguments, which can dramatically reduce diff size. When `diff.includePaths` is set, only those directories/files are included in the diff (positive selection), combined with the exclude rules. Ask whether the user wants to add extra ignored folders or include paths beyond what the config already specifies. **Always use `--make-diff` instead of running `git diff` manually**, because only `--make-diff` applies the configured rules.
 6. After `--make-diff` prints the generated diff path and size stats, **show the stats to the user** and ask them to confirm before proceeding. If the diff is unexpectedly large, suggest reviewing the config ignore rules.
 7. Once the user confirms the diff is acceptable, run analysis by passing the generated diff file path via `--diff-file`:
    ```text
@@ -92,6 +93,7 @@ Important config sections:
 - `paths.specsDir`: developer spec documents directory.
 - `paths.diffDir`: generated diff output directory.
 - `paths.outputDir`: run artifact output directory.
+- `diff.includePaths`: positive path selection — when non-empty, only these directories/files are included in the diff. Combined with exclude rules for maximum control.
 - `diff.ignoreDirs`, `diff.ignoreFiles`, `diff.ignoreGlobs`: paths excluded from generated git diff.
 - `analysis.requireRepoWiki`, `analysis.requireRequirements`, `analysis.requireSpecs`: whether missing context should block or warn.
 - `analysis.maxClusterContextChars`: per-cluster evidence pack size budget.
@@ -104,10 +106,10 @@ If required repo wiki is missing, tell the user to generate it with the repo-wik
 Step 1 — Generate the diff (does NOT start analysis):
 
 ```text
-uv run --project "<skill_root>" python "<skill_root>/scripts/front_end_impact_analyzer.py" --project-root "<target_project_root>" --make-diff --base-branch "<base_branch>" --compare-branch "<compare_branch>"
+uv run --project "<skill_root>" python "<skill_root>/scripts/front_end_impact_analyzer.py" --project-root "<target_project_root>" --make-diff --base-branch "<base_branch>" --compare-branch "<compare_branch>" --include-path "<path1>" --include-path "<path2>"
 ```
 
-`--make-diff` reads `diff.ignoreDirs`, `diff.ignoreFiles`, and `diff.ignoreGlobs` from `impact-analyzer.config.json` and passes them as `:(exclude)` pathspecs to `git diff`. This typically reduces diff size by 10-100x. The CLI prints the number of exclude pathspecs applied, the resulting diff file path, line count, and size, then **stops**. Show the stats to the user and let them confirm before proceeding.
+`--make-diff` reads `diff.includePaths`, `diff.ignoreDirs`, `diff.ignoreFiles`, and `diff.ignoreGlobs` from `impact-analyzer.config.json`. When `diff.includePaths` is non-empty (or `--include-path` is provided via CLI), only those paths are included in the diff (positive selection); otherwise all files are included. Exclude rules are always applied on top. This typically reduces diff size by 10-100x. The CLI prints the include paths, exclude pathspecs, the resulting diff file path, line count, and size, then **stops**. Show the stats to the user and let them confirm before proceeding.
 
 Step 2 — Run analysis with the generated diff:
 
@@ -300,7 +302,7 @@ Refinement is semantic cleanup based on existing code and document evidence. It 
 ## Decision Rules
 
 - **When `--init-config` creates a new config file, STOP and wait for the user to confirm before continuing.** The config controls diff ignore rules, output paths, and analysis behavior. The user must have a chance to customize it. Do not proceed to preflight, diff generation, or analysis until the user explicitly says the config is ready.
-- **NEVER run `git diff` directly as a shell command.** Always use the analyzer's `--make-diff` flag to generate diff files. Only `--make-diff` applies the configured ignore rules from `impact-analyzer.config.json` (`diff.ignoreDirs`, `diff.ignoreFiles`, `diff.ignoreGlobs`). Running `git diff` manually will produce a full unfiltered diff that can be 10-100x larger than necessary.
+- **NEVER run `git diff` directly as a shell command.** Always use the analyzer's `--make-diff` flag to generate diff files. Only `--make-diff` applies the configured include paths and ignore rules from `impact-analyzer.config.json` (`diff.includePaths`, `diff.ignoreDirs`, `diff.ignoreFiles`, `diff.ignoreGlobs`). Running `git diff` manually will produce a full unfiltered diff that can be 10-100x larger than necessary.
 - If the user provides an existing diff file via `--diff-file`, warn them that config ignore rules were not applied and the diff may be unnecessarily large. Suggest regenerating with `--make-diff` if the diff is too large.
 - Do not analyze a 50k-line diff as one prompt-sized object.
 - Use `03-diff-index.json` for global overview.

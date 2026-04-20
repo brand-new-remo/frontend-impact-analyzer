@@ -47,7 +47,7 @@ uv run --project "<skill_root>" python "<skill_root>/scripts/front_end_impact_an
 Generate and analyze branch diff:
 
 ```text
-uv run --project "<skill_root>" python "<skill_root>/scripts/front_end_impact_analyzer.py" --project-root "<target_project_root>" --make-diff --base-branch "<base_branch>" --compare-branch "<compare_branch>" --ignore-dir "<extra_ignored_dir_if_needed>"
+uv run --project "<skill_root>" python "<skill_root>/scripts/front_end_impact_analyzer.py" --project-root "<target_project_root>" --make-diff --base-branch "<base_branch>" --compare-branch "<compare_branch>" --ignore-dir "<extra_ignored_dir_if_needed>" --include-path "<path_if_needed>"
 ```
 
 Or analyze an existing diff:
