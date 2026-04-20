@@ -17,7 +17,7 @@ The analyzer now produces an analysis package plus run artifacts:
 
 1. Run `--doctor` to check environment, including potential venv conflicts.
 2. Check whether `impact-analyzer.config.json` exists.
-3. If it does not exist, create it with `--init-config`. The output will include `"userActionRequired": true`. **STOP here.** Show the user the config file path and key sections (`diff.includePaths`, `diff.ignoreDirs`, `diff.ignoreFiles`, `diff.ignoreGlobs`, `paths.*`, `analysis.requireRepoWiki`). Ask the user to review and confirm. **Do NOT proceed to any later step until the user explicitly says the config is ready.** If the user wants to modify it, wait until they finish and tell you to continue.
+3. If it does not exist, create it with `--init-config`. The output will include `"userActionRequired": true`. **STOP here.** Show the user the config file path and key sections (`diff.includePaths`, `diff.ignoreDirs`, `diff.ignoreFiles`, `diff.ignoreGlobs`, `paths.*`, `analysis.requireRepoWiki`, `knowledgeBase.*`). Ask the user to review and confirm. **Do NOT proceed to any later step until the user explicitly says the config is ready.** If the user wants to modify it, wait until they finish and tell you to continue.
 4. If it already exists, do not overwrite or regenerate it. Load and use it directly.
 5. Run or inspect preflight through a normal analysis run.
 6. Ask whether to install the bundled Claude Code subagent templates into the target project's `.claude/agents/` directory.
@@ -48,10 +48,11 @@ For each cluster with `needsDeepAnalysis=true`:
 2. Read `cluster-context/<clusterId>.json`.
 3. Inspect `diffEvidence`, `traceEvidence`, `routeEvidence`, `flowHints`, `codeEvidence`, `commentEvidence`, `riskHints`, and `documentCandidates`.
 4. Open original repo-wiki / requirement / spec files when snippets or matched headings are not enough.
-5. Use the installed `.claude/agents/change-intent-judge.md` when available to determine the precise user-visible change.
-6. Use the installed `.claude/agents/evidence-checker.md` when available to verify claims.
-7. Use the installed `.claude/agents/case-writer.md` when available to write cases.
-8. Write uncertainty when evidence is weak.
+5. When `knowledgeBase.enabled` is `true` in `impact-analyzer.config.json`, query the MCP tool `mcp__sf-knx__knowledge_retrieve` with `knowledgeBase.kbIds` to understand business context and enrich analysis with domain-specific knowledge. Use concise Chinese queries (e.g. "报表是如何创建的"). Cross-reference knowledge base results with code/document evidence.
+6. Use the installed `.claude/agents/change-intent-judge.md` when available to determine the precise user-visible change.
+7. Use the installed `.claude/agents/evidence-checker.md` when available to verify claims.
+8. Use the installed `.claude/agents/case-writer.md` when available to write cases.
+9. Write uncertainty when evidence is weak.
 
 Recommended output file:
 

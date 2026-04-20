@@ -63,6 +63,13 @@ DEFAULT_CONFIG: Dict = {
         "clusterContextBatchSize": 10,
         "phasedExecutionThreshold": 1000,
     },
+    "knowledgeBase": {
+        "enabled": False,
+        "mcpServer": "sf-knx",
+        "mcpTool": "knowledge_retrieve",
+        "kbIds": [],
+        "rerankId": "",
+    },
 }
 
 
@@ -103,6 +110,8 @@ def write_default_config(project_root: Path, config_file: Optional[Path] = None,
             "  - diff.ignoreGlobs: glob patterns excluded (e.g. *.map, __snapshots__)\n"
             "  - paths.repoWikiDir, paths.requirementsDir, paths.specsDir: document directories\n"
             "  - analysis.requireRepoWiki: whether repo-wiki is required\n"
+            "  - knowledgeBase.enabled: enable MCP knowledge base queries during analysis\n"
+            "  - knowledgeBase.kbIds: knowledge base ID array (must be set when enabled)\n"
             "The user MUST confirm the config is acceptable before the workflow continues."
         ),
     }

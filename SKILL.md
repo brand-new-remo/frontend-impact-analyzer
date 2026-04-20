@@ -17,6 +17,7 @@ The skill is designed for large PRs and release diffs. It should not ask the use
      - `diff.ignoreDirs` / `diff.ignoreFiles` / `diff.ignoreGlobs` — controls which files are excluded from the git diff; this is critical for reducing diff size
      - `paths.*` — document and output directories
      - `analysis.requireRepoWiki` — whether repo-wiki is mandatory
+     - `knowledgeBase.*` — optional MCP knowledge base integration for enriching test case semantics with domain-specific business knowledge
      Tell the user: "I have generated a default config file at `<path>`. Please review and modify it if needed (especially the `diff` ignore rules), then let me know when you are ready to continue."
      **Do NOT run any subsequent steps (preflight, diff, analysis) until the user explicitly confirms the config is acceptable.** If the user says they want to modify it, wait for them to finish and tell you to continue.
    - If it **already exists**, do **not** overwrite or regenerate it. Load and use it directly. Never run `--init-config` again unless the user explicitly asks to reset the config with `--force-config`.
@@ -98,6 +99,11 @@ Important config sections:
 - `analysis.requireRepoWiki`, `analysis.requireRequirements`, `analysis.requireSpecs`: whether missing context should block or warn.
 - `analysis.maxClusterContextChars`: per-cluster evidence pack size budget.
 - `analysis.phasedExecutionThreshold`: diff line count threshold for automatic phased execution (default: 1000). When the diff exceeds this many lines, `--diff-file` automatically runs only the parse phase and instructs the agent to continue with `--phase scan` and `--phase analyze`. Set to 0 to disable auto-phasing.
+- `knowledgeBase.enabled`: whether to use the MCP knowledge base during cluster analysis (default: `false`). When `true`, all Claude subagents (change-intent-judge, evidence-checker, case-writer, case-refiner) will query the knowledge base to enrich analysis with domain-specific business knowledge.
+- `knowledgeBase.mcpServer`: MCP server name (default: `"sf-knx"`).
+- `knowledgeBase.mcpTool`: MCP tool name (default: `"knowledge_retrieve"`).
+- `knowledgeBase.kbIds`: array of knowledge base ID configurations to pass as `kb_ids` parameter. Must be configured by the user (e.g. a knowledge base ID for the target project's business documentation).
+- `knowledgeBase.rerankId`: optional rerank model ID for improving retrieval quality.
 
 If required repo wiki is missing, tell the user to generate it with the repo-wiki skill before continuing.
 
@@ -238,11 +244,12 @@ For each cluster with `needsDeepAnalysis=true`:
 5. Inspect `traceEvidence`, `routeEvidence`, `flowHints`, and `riskHints` before making impact claims.
 6. Inspect `commentEvidence` as candidate business evidence, not final proof.
 7. If document snippets are ambiguous or insufficient, open the original repo-wiki/requirement/spec files around the matched headings or sections.
-8. Use the `change-intent-judge` agent when available to determine the precise user-visible change.
-9. Use the `evidence-checker` agent when available to verify claims and confidence.
-10. Use the `case-writer` agent when available to write cluster-specific QA cases.
-11. Keep evidence and uncertainty explicit.
-12. Avoid broadening scope beyond the evidence.
+8. When `knowledgeBase.enabled` is `true`, query the knowledge base via `mcp__sf-knx__knowledge_retrieve` to understand business context, verify domain-specific workflows, and enrich case semantics. Pass `knowledgeBase.kbIds` as `kb_ids` and construct concise Chinese queries targeting the business concept (e.g. "报表是如何创建的", "审批流程的具体步骤"). Use retrieved knowledge alongside code and document evidence — never as the sole source of truth.
+9. Use the `change-intent-judge` agent when available to determine the precise user-visible change.
+10. Use the `evidence-checker` agent when available to verify claims and confidence.
+11. Use the `case-writer` agent when available to write cluster-specific QA cases.
+12. Keep evidence and uncertainty explicit.
+13. Avoid broadening scope beyond the evidence.
 
 Recommended cluster-analysis output shape:
 

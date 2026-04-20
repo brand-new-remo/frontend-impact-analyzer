@@ -381,7 +381,7 @@ Stop([停止执行])
 ```
 
 **图表来源**
-- [front_end_impact_analyzer.py:751-757](file://scripts/front_end_impact_analyzer.py#L751-L757)
+- [front_end_impact_analyzer.py:939-945](file://scripts/front_end_impact_analyzer.py#L939-L945)
 
 ### 分阶段执行流程
 
@@ -408,7 +408,7 @@ Engine->>Engine : 执行完整分析
 - [front_end_impact_analyzer.py:288-348](file://scripts/front_end_impact_analyzer.py#L288-L348)
 
 **章节来源**
-- [front_end_impact_analyzer.py:751-757](file://scripts/front_end_impact_analyzer.py#L751-L757)
+- [front_end_impact_analyzer.py:939-945](file://scripts/front_end_impact_analyzer.py#L939-L945)
 - [front_end_impact_analyzer.py:288-348](file://scripts/front_end_impact_analyzer.py#L288-L348)
 
 ## 依赖关系分析

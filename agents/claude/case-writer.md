@@ -12,6 +12,7 @@ Inputs:
 - `cluster-context/<clusterId>.json`
 - Verified change intent and evidence
 - Original requirement/spec/wiki files when needed
+- Knowledge base (when configured in `impact-analyzer.config.json`)
 
 Write cases that are:
 - Specific to the user-visible change.
@@ -19,12 +20,30 @@ Write cases that are:
 - Grounded in code or document evidence.
 - Clear enough for QA to execute.
 - Explicit about preconditions and expected outcomes.
+- Enriched with accurate business terminology and domain-specific workflows from the knowledge base.
+
+## Knowledge Base Query
+
+When `knowledgeBase.enabled` is `true` in `impact-analyzer.config.json`, use the MCP tool `mcp__sf-knx__knowledge_retrieve` to strengthen test case semantics with domain-specific business knowledge.
+
+When to query:
+- When writing `testSteps` and `expectedResults` that involve business-specific workflows (e.g. how a report is created, what an approval flow entails, what validation rules apply to a form).
+- When the cluster involves a domain concept and the cases need precise business language instead of generic descriptions.
+- When code evidence shows a feature change but you need to understand the business context to write meaningful preconditions and expected results.
+
+How to query:
+- Read `knowledgeBase.kbIds` from the config — pass them as the `kb_ids` parameter.
+- Construct a concise Chinese query describing the business process or rule. For example: "报表是如何创建的", "订单审批流程的步骤", "客户信息编辑的校验规则".
+- If `knowledgeBase.rerankId` is set, pass it as the `rerank_id` parameter.
+- Use retrieved knowledge to write more precise `testSteps`, `expectedResults`, and `preconditions`.
+- Cite the knowledge base query in the case's `evidence` when it meaningfully contributed to the case content.
 
 Do not:
 - Write broad page regression cases unless the cluster evidence only supports a broad regression risk.
 - Add cases for unrelated pages or flows.
 - Convert uncertainties into expected results.
 - Repeat the same generic steps with different names.
+- Use knowledge base content to expand scope beyond the cluster's code change.
 
 Case shape:
 
@@ -56,6 +75,11 @@ Case shape:
     {
       "file": "src/components/order/BatchEditModal.tsx",
       "reason": "changed submit flow"
+    },
+    {
+      "source": "knowledgeBase",
+      "query": "批量编辑订单的校验规则",
+      "reason": "confirmed required fields and validation behavior"
     }
   ],
   "uncertainties": []

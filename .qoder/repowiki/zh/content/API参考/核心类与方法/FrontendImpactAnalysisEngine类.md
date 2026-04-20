@@ -13,11 +13,13 @@
 - [scripts/analyzer/workflow.py](file://scripts/analyzer/workflow.py)
 - [scripts/analyzer/result_merger.py](file://scripts/analyzer/result_merger.py)
 - [tests/test_impact_engine.py](file://tests/test_impact_engine.py)
+- [pyproject.toml](file://pyproject.toml)
 </cite>
 
 ## 更新摘要
 **变更内容**
-- 更新集群分析阶段的批处理执行机制
+- 更新集群分析阶段的批处理执行机制，支持 --cluster-batch N 和 --cluster-batch merge 功能
+- 增大最大深分析集群数限制从30到500
 - 新增深分析和浅分析集群分离处理的详细说明
 - 增强对大量浅集群优化处理能力的描述
 - 添加新的配置参数说明和最佳实践
@@ -40,7 +42,7 @@ FrontendImpactAnalysisEngine是前端影响分析引擎的核心类，负责执�
 
 该引擎采用模块化设计，将复杂的分析流程分解为多个独立的处理阶段，每个阶段都有明确的输入输出和错误处理机制。引擎支持React、React Router和Vite项目的前端变更影响分析，能够自动识别页面、路由、组件等关键元素，并追踪变更的影响范围。
 
-**更新** 引擎现已支持集群分析阶段的重大改进，包括批处理执行机制、深分析和浅分析集群的分离处理，以及对大量浅集群的优化处理能力。
+**更新** 引擎现已支持集群分析阶段的重大改进，包括批处理执行机制、深分析和浅分析集群的分离处理，以及对大量浅集群的优化处理能力。新增的 --cluster-batch 功能允许用户分批处理大规模集群，而 --cluster-batch merge 功能则支持将多个批处理结果合并为最终输出。
 
 ## 项目结构
 
@@ -203,7 +205,7 @@ FrontendImpactAnalysisEngine.run()方法是整个分析流程的核心，执行�
 **更新** 集群分析阶段现在包含以下重大改进：
 
 1. **深分析和浅分析集群分离**：
-   - 使用`maxDeepClusters`参数控制深分析集群数量（默认30）
+   - 使用`max_deep_clusters`参数控制深分析集群数量（默认500）
    - 通过`needsDeepAnalysis`字段区分深分析和浅分析集群
    - 深分析集群：需要详细的人工分析
    - 浅分析集群：使用简化上下文进行快速分析
@@ -305,7 +307,7 @@ Collector-->>Engine : 返回轻量级上下文
 
 | 参数名 | 默认值 | 描述 |
 |--------|--------|------|
-| maxDeepClusters | 30 | 深分析集群的最大数量限制 |
+| maxClustersForDeepAnalysis | 500 | 深分析集群的最大数量限制（从30增加到500） |
 | clusterContextBatchSize | 10 | 集群上下文收集的批处理大小 |
 | maxFilesPerClusterContext | 8 | 每个聚类上下文的最大文件数 |
 | maxDocumentSnippetsPerCluster | 6 | 每个聚类的最大文档片段数 |
@@ -313,6 +315,51 @@ Collector-->>Engine : 返回轻量级上下文
 **章节来源**
 - [scripts/analyzer/cluster_builder.py:92-141](file://scripts/analyzer/cluster_builder.py#L92-L141)
 - [scripts/analyzer/workflow.py:52-64](file://scripts/analyzer/workflow.py#L52-L64)
+
+### 批处理执行系统
+
+**更新** 新增的批处理执行系统支持大规模集群的分批处理：
+
+#### 批处理命令行参数
+
+引擎现在支持以下批处理相关参数：
+
+1. **--cluster-batch N**：处理第N个批次的集群（1-based索引）
+2. **--cluster-batch merge**：合并所有批处理结果为最终输出
+3. **--run-dir**：指定运行目录，用于批处理模式
+
+#### 批处理执行流程
+
+```mermaid
+sequenceDiagram
+participant CLI as 命令行
+participant Engine as FrontendImpactAnalysisEngine
+participant Batch as 批处理系统
+CLI->>Engine : --phase cluster --cluster-batch N
+Engine->>Batch : 加载检查点数据
+Batch->>Batch : 构建变更聚类
+Batch->>Batch : 计算总批次数
+Batch->>Batch : 提取第N个批次
+Batch->>Batch : 批量收集上下文
+Batch->>CLI : 写入cluster-context文件
+CLI->>Engine : --phase cluster --cluster-batch merge
+Engine->>Batch : 加载所有批处理上下文
+Batch->>Batch : 合并为最终结果
+Batch->>CLI : 写入最终分析产物
+```
+
+**图表来源**
+- [scripts/front_end_impact_analyzer.py:654-820](file://scripts/front_end_impact_analyzer.py#L654-L820)
+
+#### 批处理配置参数
+
+| 参数名 | 默认值 | 描述 |
+|--------|--------|------|
+| maxClustersForDeepAnalysis | 500 | 深分析集群的最大数量限制 |
+| clusterContextBatchSize | 10 | 批处理大小，控制每次处理的集群数量 |
+
+**章节来源**
+- [scripts/front_end_impact_analyzer.py:654-820](file://scripts/front_end_impact_analyzer.py#L654-L820)
 
 ### 数据模型和状态管理
 
@@ -455,7 +502,8 @@ ResultMerger --> ClusterAnalysisValidator
 1. **深分析和浅分析分离**：减少不必要的完整上下文收集
 2. **批量上下文收集**：通过批处理减少文件I/O开销
 3. **浅分析stub优化**：对大量浅集群使用轻量级上下文
-4. **集群数量限制**：通过`maxDeepClusters`控制深分析负载
+4. **集群数量限制**：通过`max_deep_clusters`控制深分析负载
+5. **大规模集群处理**：支持最多500个深分析集群的处理
 
 ### 并行处理机会
 
@@ -473,7 +521,8 @@ ResultMerger --> ClusterAnalysisValidator
 2. **语法错误**：源码存在语法错误导致AST解析失败
 3. **导入解析失败**：无法解析某些导入路径
 4. **内存不足**：大型项目可能导致内存溢出
-5. **集群过多**：深分析集群数量超过限制
+5. **集群过多**：深分析集群数量超过限制（现为500个）
+6. **批处理参数错误**：--cluster-batch参数格式不正确
 
 ### 错误恢复机制
 
@@ -492,6 +541,7 @@ ResultMerger --> ClusterAnalysisValidator
 3. **单元测试**：运行测试用例验证特定功能
 4. **配置调整**：根据项目特点调整分析参数
 5. **性能监控**：监控批处理执行进度和资源使用
+6. **批处理模式**：使用--cluster-batch分批处理大型项目
 
 **章节来源**
 - [scripts/front_end_impact_analyzer.py:361-399](file://scripts/front_end_impact_analyzer.py#L361-L399)
@@ -506,8 +556,9 @@ FrontendImpactAnalysisEngine是一个设计精良的前端变更影响分析系�
 4. **可观测性**：详细的日志记录和状态跟踪
 5. **实用性**：提供可操作的分析结果和建议
 6. **高性能**：支持批处理和集群分离优化
+7. **大规模处理能力**：支持最多500个深分析集群的处理
 
-**更新** 引擎现已具备强大的集群分析能力，能够高效处理大规模变更，通过深分析和浅分析的分离以及批处理机制，显著提升了处理大量浅集群的效率。
+**更新** 引擎现已具备强大的集群分析能力，能够高效处理大规模变更，通过深分析和浅分析的分离以及批处理机制，显著提升了处理大量浅集群的效率。新增的 --cluster-batch 功能使得用户可以分批处理大型项目，而 --cluster-batch merge 功能则支持将多个批处理结果合并为最终输出。
 
 该引擎适用于React、React Router和Vite项目，能够有效帮助开发团队理解代码变更的影响范围，提高代码质量和发布安全性。
 
@@ -546,10 +597,10 @@ print(state.output)
 # 自定义配置
 config = {
     "analysis": {
-        "maxDeepClusters": 50,           # 增加深分析集群数量限制
-        "clusterContextBatchSize": 15,   # 增大批处理大小
-        "maxFilesPerClusterContext": 10, # 增加每个聚类的文件限制
-        "maxDocumentSnippetsPerCluster": 8 # 增加文档片段限制
+        "maxClustersForDeepAnalysis": 500,           # 增加深分析集群数量限制
+        "clusterContextBatchSize": 15,              # 增大批处理大小
+        "maxFilesPerClusterContext": 10,            # 增加每个聚类的文件限制
+        "maxDocumentSnippetsPerCluster": 8          # 增加文档片段限制
     }
 }
 
@@ -558,6 +609,33 @@ engine = FrontendImpactAnalysisEngine(
     diff_text=diff_text,
     config=config
 )
+```
+
+#### 批处理执行示例
+
+**更新** 新增的批处理功能使用示例：
+
+```bash
+# 第一步：处理第1个批次
+uv run --project "<skill_root>" python "<skill_root>/scripts/front_end_impact_analyzer.py" \
+  --project-root "<target_project_root>" \
+  --phase cluster \
+  --cluster-batch 1 \
+  --run-dir "<run_artifact_dir>"
+
+# 第二步：处理第2个批次
+uv run --project "<skill_root>" python "<skill_root>/scripts/front_end_impact_analyzer.py" \
+  --project-root "<target_project_root>" \
+  --phase cluster \
+  --cluster-batch 2 \
+  --run-dir "<run_artifact_dir>"
+
+# 第三步：合并所有批次结果
+uv run --project "<skill_root>" python "<skill_root>/scripts/front_end_impact_analyzer.py" \
+  --project-root "<target_project_root>" \
+  --phase cluster \
+  --cluster-batch merge \
+  --run-dir "<run_artifact_dir>"
 ```
 
 ### 最佳实践
@@ -569,6 +647,9 @@ engine = FrontendImpactAnalysisEngine(
 5. **测试覆盖**：为关键分析逻辑编写单元测试
 6. **批处理优化**：根据集群数量调整批处理大小
 7. **深浅分析平衡**：合理控制深分析集群的比例
+8. **大规模项目处理**：对于超过500个深分析集群的项目，使用批处理功能
+9. **资源规划**：为批处理模式预留足够的磁盘空间和内存
+10. **错误处理**：在批处理过程中监控错误并及时处理
 
 ### API参考
 
@@ -582,7 +663,7 @@ engine = FrontendImpactAnalysisEngine(
 
 **更新** 新增的集群分析参数：
 
-- **maxDeepClusters**：深分析集群的最大数量（默认30）
+- **maxClustersForDeepAnalysis**：深分析集群的最大数量（默认500，从30增加）
 - **clusterContextBatchSize**：批处理大小（默认10）
 - **时间复杂度**：O(V+E)，其中V为节点数，E为边数
 - **空间复杂度**：O(V+E)
@@ -596,3 +677,14 @@ engine = FrontendImpactAnalysisEngine(
 2. **浅分析集群**：使用简化上下文的快速分析
 3. **批处理优化**：大量浅集群的高效处理
 4. **资源配置**：合理分配计算资源给不同类型集群
+5. **大规模处理**：支持最多500个深分析集群的处理
+
+#### 批处理执行策略
+
+**更新** 新增的批处理功能：
+
+1. **分批处理**：将大规模集群分批处理，避免内存溢出
+2. **结果合并**：使用--cluster-batch merge功能合并所有批次结果
+3. **进度跟踪**：支持多批次执行的进度跟踪和错误恢复
+4. **资源优化**：通过批处理减少单次执行的资源消耗
+5. **容错机制**：单个批次的失败不影响其他批次的处理
